@@ -44,9 +44,9 @@ else
   STATE_DIR="${LLM_STATE_DIR:-$REPO_ROOT/.llm-toolkit}"
 fi
 
-# Load .env files. The environment wins: a variable already set (exported in
-# your shell or CI) is not overridden by the file. Loaded toolkit first, then
-# the state dir.
+# Load .env. The environment wins: a variable already set (exported in your shell
+# or CI) is not overridden. The repo's root .env wins over the legacy
+# .llm-toolkit/.env.
 load_env() {
   local f="$1" line key val
   [ -f "$f" ] || return 0
@@ -62,7 +62,7 @@ load_env() {
     export "$key=$val"
   done < "$f"
 }
-load_env "$TOOLKIT_DIR/.env"
+load_env "$REPO_ROOT/.env"
 load_env "$STATE_DIR/.env"
 
 # Global, user-level settings (secrets shared across repos). Lowest precedence:
@@ -155,32 +155,42 @@ if [ "$HARNESS" = "run" ]; then
   [ -n "$HARNESS" ] || die "run: --harness is required"
 fi
 
-# `llm init` copies the toolkit template into a repo's .llm-toolkit/.
+# `llm init` scaffolds a repo: the .llm-toolkit/ template, and the llm-toolkit
+# block in the repo's root .env (created, or appended if the block is missing).
 if [ "$HARNESS" = "init" ]; then
   mkdir -p "$STATE_DIR/data"
-  if [ -f "$TEMPLATE/.env.example" ]; then
-    if [ ! -f "$STATE_DIR/.env" ]; then
-      cp "$TEMPLATE/.env.example" "$STATE_DIR/.env"
-      echo "created .env"
+
+  ENV_FILE="$REPO_ROOT/.env"
+  BLOCK="$TEMPLATE/.env.example"
+  if [ -f "$ENV_FILE" ]; then
+    if grep -qF '# --- llm-toolkit ---' "$ENV_FILE"; then
+      echo "kept llm-toolkit settings in $ENV_FILE"
     else
-      echo "kept existing .env"
+      printf '\n' >> "$ENV_FILE"
+      cat "$BLOCK" >> "$ENV_FILE"
+      echo "appended llm-toolkit settings to $ENV_FILE"
     fi
+  else
+    cp "$BLOCK" "$ENV_FILE"
+    echo "created $ENV_FILE"
   fi
+
   for f in "$TEMPLATE"/*; do
     [ -e "$f" ] || continue
     base="$(basename "$f")"
     dest="$STATE_DIR/$base"
     if [ ! -e "$dest" ]; then
       cp -R "$f" "$dest"
-      echo "added $base"
+      echo "added .llm-toolkit/$base"
     fi
   done
+
   echo "state dir: $STATE_DIR"
-  echo "add to .gitignore (commit the rest of .llm-toolkit/):"
+  echo "add to .gitignore:"
+  echo "  .env"
   if [ "$STATE_DIR" = "$REPO_ROOT" ]; then
-    echo "  .env"; echo "  /data/"
+    echo "  /data/"
   else
-    echo "  ${STATE_DIR#"$REPO_ROOT"/}/.env"
     echo "  ${STATE_DIR#"$REPO_ROOT"/}/data/"
   fi
   exit 0

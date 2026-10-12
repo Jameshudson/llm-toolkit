@@ -120,10 +120,10 @@ layers with `make build-base`, `make build-node`, `make build-opencode`,
 | `SESSION_LIMIT` | USD credit limit applied to the managed key (default `$5`). Empty = no limit; changing it re-syncs the existing key's limit. |
 | `LLM_SESSION_KEYS` | `0` disables the managed key and uses `OPENROUTER_API_KEY` directly. |
 
-Keys are resolved in this order (first wins): the environment, the repo's
-`.llm-toolkit/.env`, then a global `~/.llm-toolkit/settings.json`. Put shared
-secrets (like `OPENROUTER_MANAGEMENT_KEY`) in the global file so you don't repeat
-them per repo; override `LLM_HOME` to relocate it.
+Keys are resolved in this order (first wins): the environment, the repo's root
+`.env`, then a global `~/.llm-toolkit/settings.json`. Put shared secrets (like
+`OPENROUTER_MANAGEMENT_KEY`) in the global file so you don't repeat them per
+repo; override `LLM_HOME` to relocate it.
 
 Before launching, `llm` reads the provider from the harness config and **refuses
 to start** if its key is missing. If you're in a terminal it prompts for the key
@@ -136,18 +136,20 @@ Bypass with `LLM_SKIP_KEY_CHECK=1` (e.g. when you authenticated another way).
 From anywhere inside a git repo:
 
 ```sh
-llm init          # scaffold .llm-toolkit/ (settings + state)
-$EDITOR .llm-toolkit/.env
+llm init          # scaffold .llm-toolkit/ + add the llm-toolkit block to .env
+$EDITOR .env
 llm opencode      # or: llm pi
 ```
 
-`llm init` copies the toolkit's `template/` into the repo as `.llm-toolkit/`:
-the project-owned `config/`, a `README.md`, and `.env.example` → `.env`.
+`llm init` copies the toolkit's `template/` into the repo as `.llm-toolkit/`
+(`config/`, `image/`, `README.md`), and adds a `# --- llm-toolkit ---` block to the
+repo's **root `.env`** — creating it, or appending if the block isn't already
+there.
 
-`.llm-toolkit/` is project settings, so commit it — except secrets and state:
+Commit `.llm-toolkit/` (except its `data/`), and keep the root `.env` out of git:
 
 ```gitignore
-.llm-toolkit/.env
+.env
 .llm-toolkit/data/
 ```
 
@@ -167,16 +169,18 @@ HARNESS=pi ARGS="..."`.
 
 ```
 .llm-toolkit/
-├── .env                 keys and defaults (gitignored)
 ├── README.md            what each file is
 ├── config/              opencode/pi config for this project (commit it)
-├── image/               optional derived-image Dockerfile (commit it)
+├── image/               derived Dockerfile, mounts, on-start.sh (commit it)
 └── data/                harness sessions, auth, caches (gitignored)
+
+.env                     llm-toolkit keys/settings, at the repo root (gitignored)
 ```
 
-Everything except `.env` and `data/` is meant to be committed. Optional
-`image/Dockerfile`, `image/mounts`, and `image/on-start.sh` files (documented in
-`.llm-toolkit/README.md`) are created on demand.
+Everything in `.llm-toolkit/` except `data/` is meant to be committed, and the
+root `.env` stays out of git. Optional `image/Dockerfile`, `image/mounts`, and
+`image/on-start.sh` files (documented in `.llm-toolkit/README.md`) are created on
+demand.
 
 ## Per-repo customization
 

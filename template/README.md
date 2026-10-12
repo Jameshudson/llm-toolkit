@@ -2,9 +2,8 @@
 
 Per-project settings and state for the `llm` CLI.
 
-Commit this directory, except the secrets and runtime state:
+Commit this directory, except the runtime state:
 
-    .llm-toolkit/.env
     .llm-toolkit/data/
 
 ## What's here
@@ -13,10 +12,10 @@ Commit this directory, except the secrets and runtime state:
 |---|---|
 | `config/` | opencode/pi config for this project. Edit and commit; `llm config` re-seeds it from the defaults (overwriting). |
 | `image/` | Container config: derived `Dockerfile`, `mounts`, `on-start.sh`. |
-| `.env` | Per-repo overrides — gitignored. Keys are usually global (see below). |
 | `data/` | Harness runtime state (sessions, auth, caches) — gitignored. |
 
-Keys are user-level: if one is missing, `llm` prompts for it once and saves it to
+Keys live in the repo's root `.env` (gitignored), managed by `llm init`. They're
+user-level: if one is missing, `llm` prompts for it once and saves it to
 `~/.llm-toolkit/settings.json`, reused across repos. Set a key in `.env` only to
 override it for this repo.
 
