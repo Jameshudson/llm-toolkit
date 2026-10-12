@@ -32,30 +32,36 @@ template/       the .llm-toolkit/ template `llm init` copies into a repo
 include.mk      optional make sugar for project repos
 ```
 
-## Install (this repo)
+## Install
+
+On a new machine, one line (no clone needed — it downloads the toolkit):
 
 ```sh
-./install.sh       # or: make install
-make build         # optional: build the images locally now
+curl -fsSL https://raw.githubusercontent.com/Jameshudson/llm-toolkit/main/install.sh | bash
 ```
 
-`./install.sh` copies the toolkit to `~/.local/share/llm-toolkit` and puts
-`llm`, `or-key`, and `spend` on PATH via wrappers in `~/.local/bin` (override
-with `PREFIX=/some/prefix`). Images build on first use, or pull when
-`LLM_REGISTRY` is set.
+From a clone:
 
-Requires a running container runtime. OrbStack is recommended
-(`brew install --cask orbstack`).
+```sh
+./install.sh          # or: make install
+```
+
+Either way it copies the toolkit to `~/.local/share/llm-toolkit` and puts `llm`,
+`or-key`, and `spend` on PATH via wrappers in `~/.local/bin`. Override the
+location with `--prefix DIR` / `PREFIX=…`. Images build on first use, or pull
+when `LLM_REGISTRY` is set. Requires a running container runtime (OrbStack
+recommended: `brew install --cask orbstack`).
 
 ### Uninstall
 
 ```sh
-./uninstall.sh              # or: make uninstall
-./uninstall.sh --images     # also remove the llm-toolkit Docker images
+curl -fsSL https://raw.githubusercontent.com/Jameshudson/llm-toolkit/main/uninstall.sh | bash
 ```
 
-Removes the CLI wrappers and the `~/.local/share/llm-toolkit` copy. Project
-`.llm-toolkit/` directories are left untouched.
+From a clone: `./uninstall.sh` (or `make uninstall`); add `--images` to also
+remove the llm-toolkit Docker images. Removes the CLI wrappers and the
+`~/.local/share/llm-toolkit` copy. Project `.llm-toolkit/` directories are left
+untouched.
 
 ### Publish (optional)
 

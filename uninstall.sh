@@ -5,6 +5,9 @@
 #   ./uninstall.sh --prefix /usr/local
 #   ./uninstall.sh --images        # also remove the llm-toolkit Docker images
 #
+# Via curl (no clone needed):
+#   curl -fsSL https://raw.githubusercontent.com/Jameshudson/llm-toolkit/main/uninstall.sh | bash
+#
 # Project .llm-toolkit/ directories are never touched.
 set -euo pipefail
 
@@ -16,7 +19,7 @@ while [ $# -gt 0 ]; do
     --prefix)   PREFIX="${2:?--prefix needs a value}"; shift 2 ;;
     --prefix=*) PREFIX="${1#*=}"; shift ;;
     --images)   REMOVE_IMAGES=1; shift ;;
-    -h|--help)  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  echo "usage: uninstall.sh [--prefix DIR] [--images]"; exit 0 ;;
     *)          PREFIX="$1"; shift ;;
   esac
 done
