@@ -12,7 +12,7 @@ Commit this directory, except the secrets and runtime state:
 | Path | Purpose |
 |---|---|
 | `config/` | opencode/pi config for this project. Edit and commit; `llm config` re-seeds it from the defaults (overwriting). |
-| `image/` | Optional derived-image `Dockerfile` (and its build context). |
+| `image/` | Container config: derived `Dockerfile`, `mounts`, `on-start.sh`. |
 | `.env` | Per-repo overrides — gitignored. Keys are usually global (see below). |
 | `data/` | Harness runtime state (sessions, auth, caches) — gitignored. |
 
@@ -22,7 +22,8 @@ override it for this repo.
 
 ## Optional files
 
-Create any of these in `.llm-toolkit/` to customize how the container runs.
+Create any of these under `.llm-toolkit/image/` to customize how the container
+runs.
 
 ### mounts
 
@@ -30,12 +31,12 @@ Extra docker mounts, one `host:container[:opts]` per line. `#` comments, blank
 lines, and a leading `~` (expands to `$HOME`) are supported; relative host paths
 resolve from the repo root.
 
-    # .llm-toolkit/mounts
+    # .llm-toolkit/image/mounts
     ~/.aws:/root/.aws:ro
     ~/.config/gh:/root/.config/gh:ro
     ../shared-schemas:/workspace/schemas
 
-### image/Dockerfile
+### Dockerfile
 
 A derived image for extra tools, built per harness as
 `llm-toolkit:repo-<repo>-<harness>` and used automatically. The build context is
@@ -56,7 +57,7 @@ no Node).
 Runs inside the container (as root, in `/workspace`) before the harness starts.
 Keep it idempotent — it runs every session.
 
-    # .llm-toolkit/on-start.sh
+    # .llm-toolkit/image/on-start.sh
     #!/usr/bin/env bash
     set -e
     command -v psql >/dev/null || { apt-get update && apt-get install -y --no-install-recommends postgresql-client; }

@@ -10,11 +10,11 @@
 #   llm run --harness pi "prompt"     # convenience one-shot
 #
 # Per-repo customization (all optional, read from the state dir):
-#   .env          keys and defaults (see .env.example)
-#   mounts        extra docker mounts, one "host:container[:ro]" per line
-#   image/Dockerfile   derived image FROM ${LLM_REGISTRY}llm-toolkit:${HARNESS}
-#   on-start.sh   run inside the container before the harness starts
-#   config/       opencode/pi config overriding the toolkit defaults
+#   .env              keys and defaults (see .env.example)
+#   config/           opencode/pi config overriding the toolkit defaults
+#   image/Dockerfile  derived image FROM ${LLM_REGISTRY}llm-toolkit:${HARNESS}
+#   image/mounts      extra docker mounts, one "host:container[:ro]" per line
+#   image/on-start.sh runs inside the container before the harness starts
 #
 # Images are pulled from LLM_REGISTRY when set, and built from this toolkit's
 # Dockerfiles otherwise (or as a fallback).
@@ -374,9 +374,11 @@ mounts=(
 [ -d "$HOME/.ssh" ] && mounts+=(-v "$HOME/.ssh:/root/.ssh-host:ro")
 [ -f "$HOME/.gitconfig" ] && mounts+=(-v "$HOME/.gitconfig:/etc/gitconfig:ro")
 
-# Per-repo extra mounts from $STATE_DIR/mounts. One "host:container[:opts]" per
-# line; '#' comments and blank lines ignored; a leading ~ expands to $HOME.
-MOUNTS_FILE="$STATE_DIR/mounts"
+# Per-repo extra mounts. One "host:container[:opts]" per line; '#' comments and
+# blank lines ignored; a leading ~ expands to $HOME. Lives in image/ (falling
+# back to the .llm-toolkit/ root for older repos).
+MOUNTS_FILE="$STATE_DIR/image/mounts"
+[ -f "$MOUNTS_FILE" ] || MOUNTS_FILE="$STATE_DIR/mounts"
 if [ -f "$MOUNTS_FILE" ]; then
   while IFS= read -r m || [ -n "$m" ]; do
     m="${m%%$'\r'}"
@@ -388,7 +390,9 @@ if [ -f "$MOUNTS_FILE" ]; then
 fi
 
 # Per-repo on-start hook, run inside the container before the harness.
-[ -f "$STATE_DIR/on-start.sh" ] && mounts+=(-v "$STATE_DIR/on-start.sh:/opt/llm-toolkit/on-start.sh:ro")
+ON_START="$STATE_DIR/image/on-start.sh"
+[ -f "$ON_START" ] || ON_START="$STATE_DIR/on-start.sh"
+[ -f "$ON_START" ] && mounts+=(-v "$ON_START:/opt/llm-toolkit/on-start.sh:ro")
 
 # Forward the host SSH agent if we can find the socket.
 AGENT_SOCK="${SSH_AUTH_SOCK:-}"

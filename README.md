@@ -175,7 +175,7 @@ HARNESS=pi ARGS="..."`.
 ```
 
 Everything except `.env` and `data/` is meant to be committed. Optional
-`mounts`, `image/Dockerfile`, and `on-start.sh` files (documented in
+`image/Dockerfile`, `image/mounts`, and `image/on-start.sh` files (documented in
 `.llm-toolkit/README.md`) are created on demand.
 
 ## Per-repo customization
@@ -184,12 +184,12 @@ Everything is optional; the toolkit works with none of it.
 
 ### Extra mount paths
 
-Create `.llm-toolkit/mounts`, one `host:container[:opts]` per line. `#`
+Create `.llm-toolkit/image/mounts`, one `host:container[:opts]` per line. `#`
 comments, blank lines, and a leading `~` (expands to `$HOME`) are supported.
 Relative host paths resolve from the repo root.
 
 ```
-# .llm-toolkit/mounts
+# .llm-toolkit/image/mounts
 ~/.aws:/root/.aws:ro
 ~/.config/gh:/root/.config/gh:ro
 ../shared-schemas:/workspace/schemas
@@ -218,8 +218,8 @@ RUN apt-get update \
 matching run uses it automatically. Deriving from `base` gives you no Node — use
 `HARNESS=opencode` (or `pi`) if the tools need it.
 
-For lighter, on-demand setup, add `.llm-toolkit/on-start.sh` — it runs inside the
-container (as root, in `/workspace`) before the harness starts.
+For lighter, on-demand setup, add `.llm-toolkit/image/on-start.sh` — it runs
+inside the container (as root, in `/workspace`) before the harness starts.
 
 ### Config
 
