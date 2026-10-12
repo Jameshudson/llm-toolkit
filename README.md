@@ -66,10 +66,21 @@ untouched.
 ### Publish (optional)
 
 This repo's images are published to GHCR as
-`ghcr.io/jameshudson/llm-toolkit:{base,node,opencode,pi}` by the
-`images` GitHub Actions workflow (`.github/workflows/images.yml`) on push to
-`main`, on `v*` tags, or via manual dispatch. It builds multi-arch
-(amd64 + arm64), so Apple Silicon pulls a native image.
+`ghcr.io/jameshudson/llm-toolkit:{base,node,opencode,pi}` by the `images` GitHub
+Actions workflow (`.github/workflows/images.yml`). It runs only when the image
+definitions change (`images/**`) or on manual dispatch, and builds multi-arch
+(amd64 + arm64) so Apple Silicon pulls a native image.
+
+Each layer is tagged three ways:
+
+| Tag | Example | Meaning |
+|---|---|---|
+| `:<layer>` | `:opencode` | floating latest |
+| `:<layer>-<version>` | `:opencode-0.1.0` | release version (`images/VERSION`) |
+| `:<layer>-sha-<short>` | `:opencode-sha-abc1234` | immutable, per commit |
+
+Bump `images/VERSION` to cut a release. To pin an image, set
+`LLM_IMAGE=ghcr.io/jameshudson/llm-toolkit:opencode-0.1.0` (or the `-sha-…` tag).
 
 To publish by hand instead:
 
@@ -159,11 +170,12 @@ HARNESS=pi ARGS="..."`.
 ├── .env                 keys and defaults (gitignored)
 ├── README.md            what each file is
 ├── config/              opencode/pi config for this project (commit it)
+├── image/               optional derived-image Dockerfile (commit it)
 └── data/                harness sessions, auth, caches (gitignored)
 ```
 
 Everything except `.env` and `data/` is meant to be committed. Optional
-`mounts`, `Dockerfile`, and `on-start.sh` files (documented in
+`mounts`, `image/Dockerfile`, and `on-start.sh` files (documented in
 `.llm-toolkit/README.md`) are created on demand.
 
 ## Per-repo customization
@@ -188,8 +200,9 @@ To change what is mounted at `/workspace`, set `WORKDIR` in `.env` (or
 
 ### Extra tools
 
-For tools that should be baked in, add `.llm-toolkit/Dockerfile`. It selects its
-base with `ARG HARNESS` (so one file serves every harness):
+For tools that should be baked in, add `.llm-toolkit/image/Dockerfile`. It
+selects its base with `ARG HARNESS` (so one file serves every harness), and its
+build context is `image/` (so you can `COPY` files from it):
 
 ```dockerfile
 ARG LLM_REGISTRY=

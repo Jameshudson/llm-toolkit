@@ -2,7 +2,7 @@
 .env
 
 # Runtime state (sessions, auth, model caches)
-data/
+/data/
 
 # OS noise
 .DS_Store

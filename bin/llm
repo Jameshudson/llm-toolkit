@@ -12,7 +12,7 @@
 # Per-repo customization (all optional, read from the state dir):
 #   .env          keys and defaults (see .env.example)
 #   mounts        extra docker mounts, one "host:container[:ro]" per line
-#   Dockerfile    derived image FROM ${LLM_REGISTRY}llm-toolkit:${HARNESS}
+#   image/Dockerfile   derived image FROM ${LLM_REGISTRY}llm-toolkit:${HARNESS}
 #   on-start.sh   run inside the container before the harness starts
 #   config/       opencode/pi config overriding the toolkit defaults
 #
@@ -294,14 +294,19 @@ ensure_harness() {
 
 if [ -n "${LLM_IMAGE:-}" ]; then
   IMAGE="$LLM_IMAGE"
-elif [ -f "$STATE_DIR/Dockerfile" ]; then
+elif [ -f "$STATE_DIR/image/Dockerfile" ] || [ -f "$STATE_DIR/Dockerfile" ]; then
+  if [ -f "$STATE_DIR/image/Dockerfile" ]; then
+    DOCKERFILE="$STATE_DIR/image/Dockerfile"; BUILD_CONTEXT="$STATE_DIR/image"
+  else
+    DOCKERFILE="$STATE_DIR/Dockerfile"; BUILD_CONTEXT="$STATE_DIR"
+  fi
   IMAGE="llm-toolkit:repo-${SLUG}-${HARNESS_FOR_IMAGE}"
   ensure_harness "$HARNESS_FOR_IMAGE"
   if ! have "$IMAGE"; then
-    echo "llm: building $IMAGE from $STATE_DIR/Dockerfile ..." >&2
-    docker build -f "$STATE_DIR/Dockerfile" \
+    echo "llm: building $IMAGE from $DOCKERFILE ..." >&2
+    docker build -f "$DOCKERFILE" \
       --build-arg "LLM_REGISTRY=$REGISTRY" --build-arg "HARNESS=$HARNESS_FOR_IMAGE" \
-      -t "$IMAGE" "$STATE_DIR" >&2
+      -t "$IMAGE" "$BUILD_CONTEXT" >&2
   fi
 else
   IMAGE="$(img "$HARNESS_FOR_IMAGE")"

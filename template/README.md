@@ -12,6 +12,7 @@ Commit this directory, except the secrets and runtime state:
 | Path | Purpose |
 |---|---|
 | `config/` | opencode/pi config for this project. Edit and commit; `llm config` re-seeds it from the defaults (overwriting). |
+| `image/` | Optional derived-image `Dockerfile` (and its build context). |
 | `.env` | Per-repo overrides — gitignored. Keys are usually global (see below). |
 | `data/` | Harness runtime state (sessions, auth, caches) — gitignored. |
 
@@ -34,13 +35,14 @@ resolve from the repo root.
     ~/.config/gh:/root/.config/gh:ro
     ../shared-schemas:/workspace/schemas
 
-### Dockerfile
+### image/Dockerfile
 
 A derived image for extra tools, built per harness as
-`llm-toolkit:repo-<repo>-<harness>` and used automatically. `HARNESS` selects the
-base (`base` has no Node).
+`llm-toolkit:repo-<repo>-<harness>` and used automatically. The build context is
+`image/`, so you can `COPY` files from it. `HARNESS` selects the base (`base` has
+no Node).
 
-    # .llm-toolkit/Dockerfile
+    # .llm-toolkit/image/Dockerfile
     ARG LLM_REGISTRY=
     ARG HARNESS=base
     FROM ${LLM_REGISTRY}llm-toolkit:${HARNESS}

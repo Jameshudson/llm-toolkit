@@ -42,6 +42,7 @@ NODE_IMAGE     := $(LLM_REGISTRY)llm-toolkit:node
 OPENCODE_IMAGE := $(LLM_REGISTRY)llm-toolkit:opencode
 PI_IMAGE       := $(LLM_REGISTRY)llm-toolkit:pi
 REPO_SLUG      := $(shell basename $(REPO_ROOT) | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
+VERSION        := $(shell tr -d '[:space:]' < $(TOOLKIT_DIR)/images/VERSION 2>/dev/null)
 
 # Install location for `make install` (see install.sh).
 PREFIX ?= $(HOME)/.local
@@ -95,6 +96,10 @@ publish: check-registry build
 	docker push $(NODE_IMAGE)
 	docker push $(OPENCODE_IMAGE)
 	docker push $(PI_IMAGE)
+	@for h in base node opencode pi; do \
+		docker tag "$(LLM_REGISTRY)llm-toolkit:$$h" "$(LLM_REGISTRY)llm-toolkit:$$h-$(VERSION)" && \
+		docker push "$(LLM_REGISTRY)llm-toolkit:$$h-$(VERSION)"; \
+	done
 
 install:
 	@PREFIX="$(PREFIX)" "$(TOOLKIT_DIR)/install.sh"
