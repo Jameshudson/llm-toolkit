@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# llm — launch a coding harness inside the llm-toolkit container and record the
-# session's spend.
+# llm — launch a coding harness inside the llm-toolkit container.
 #
 # Usage:
 #   llm init                          # copy the toolkit's template/ into .llm-toolkit/
@@ -20,10 +19,10 @@
 # Images are pulled from LLM_REGISTRY when set, and built from this toolkit's
 # Dockerfiles otherwise (or as a fallback).
 #
-# Spend: when OPENROUTER_MANAGEMENT_KEY is set (and LLM_SESSION_KEYS is not 0),
-# one OpenRouter API key per project+harness is reused (cached in data/keys.json)
-# and injected as OPENROUTER_API_KEY; its usage delta across the run is recorded
-# to spend/sessions.jsonl. See the README for the DeepSeek caveat.
+# When OPENROUTER_MANAGEMENT_KEY is set (and LLM_SESSION_KEYS is not 0), one
+# OpenRouter API key per project+harness is reused (cached in
+# ~/.llm-toolkit/keys.json) and injected as OPENROUTER_API_KEY, capped by
+# SESSION_LIMIT.
 set -euo pipefail
 
 # LLM_TOOLKIT_DIR lets an installed CLI point back at its data dir.
@@ -37,8 +36,8 @@ REPO_ROOT="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
 [ -n "$REPO_ROOT" ] || REPO_ROOT="$(git -C "$TOOLKIT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
 [ -n "$REPO_ROOT" ] || REPO_ROOT="$TOOLKIT_DIR"
 
-# State (.env, data/, spend/) lives in the repo. Only when the toolkit IS the
-# repo (standalone use) does it fall back to the toolkit dir.
+# State (.env, data/) lives in the repo. Only when the toolkit IS the repo
+# (standalone use) does it fall back to the toolkit dir.
 if [ "$REPO_ROOT" = "$TOOLKIT_DIR" ]; then
   STATE_DIR="${LLM_STATE_DIR:-$REPO_ROOT}"
 else
@@ -130,7 +129,6 @@ img() { printf '%s' "${REGISTRY}llm-toolkit:$1"; }
 
 WORKDIR="${WORKDIR:-$REPO_ROOT}"
 LLM_SESSION_KEYS="${LLM_SESSION_KEYS:-1}"
-SPEND_FILE="$STATE_DIR/spend/sessions.jsonl"
 export LLM_STATE_DIR="$STATE_DIR"
 
 die() { echo "llm: $*" >&2; exit 1; }
@@ -180,11 +178,10 @@ if [ "$HARNESS" = "init" ]; then
   echo "state dir: $STATE_DIR"
   echo "add to .gitignore (commit the rest of .llm-toolkit/):"
   if [ "$STATE_DIR" = "$REPO_ROOT" ]; then
-    echo "  .env"; echo "  /data/"; echo "  /spend/"
+    echo "  .env"; echo "  /data/"
   else
     echo "  ${STATE_DIR#"$REPO_ROOT"/}/.env"
     echo "  ${STATE_DIR#"$REPO_ROOT"/}/data/"
-    echo "  ${STATE_DIR#"$REPO_ROOT"/}/spend/"
   fi
   exit 0
 fi
@@ -311,16 +308,11 @@ else
   ensure_harness "$HARNESS_FOR_IMAGE"
 fi
 
-# --- session identity ---------------------------------------------------------
-SESSION_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM}"
-
 # --- OpenRouter key: one per project+harness, reused across sessions ----------
-# The key secret is cached locally (data/keys.json, gitignored); per-session
-# spend is the difference in its usage across the run.
+# The key secret is cached globally (~/.llm-toolkit/keys.json, 0600).
 KEY_HASH=""
 KEY_LABEL=""
 SESSION_KEY=""
-USAGE_BEFORE="0"
 
 if [ "$HARNESS" != "shell" ] && [ "$LLM_SESSION_KEYS" != "0" ] && [ -n "${OPENROUTER_MANAGEMENT_KEY:-}" ]; then
   KEY_LABEL="llm-toolkit/${HOST_SHORT}/${SLUG}/${HARNESS}"
@@ -356,16 +348,12 @@ if [ "$HARNESS" != "shell" ] && [ "$LLM_SESSION_KEYS" != "0" ] && [ -n "${OPENRO
 
   if [ -n "$SESSION_KEY" ]; then
     OPENROUTER_API_KEY="$SESSION_KEY"; export OPENROUTER_API_KEY
-    if [ -n "$KEY_HASH" ]; then
+    if [ -n "$KEY_HASH" ] && [ -n "${SESSION_LIMIT:-}" ]; then
       key_json="$("$TOOLKIT_DIR/bin/or-key" get "$KEY_HASH" 2>/dev/null || true)"
-      USAGE_BEFORE="$(jq -r '.usage // 0' <<<"$key_json" 2>/dev/null || true)"
-      case "$USAGE_BEFORE" in ''|*[!0-9.]*) USAGE_BEFORE="0" ;; esac
       # Keep the key's credit limit in sync with SESSION_LIMIT.
-      if [ -n "${SESSION_LIMIT:-}" ]; then
-        cur_limit="$(jq -r '.limit // empty' <<<"$key_json" 2>/dev/null || true)"
-        [ "$cur_limit" = "$SESSION_LIMIT" ] \
-          || "$TOOLKIT_DIR/bin/or-key" update "$KEY_HASH" --limit "$SESSION_LIMIT" >/dev/null 2>&1 || true
-      fi
+      cur_limit="$(jq -r '.limit // empty' <<<"$key_json" 2>/dev/null || true)"
+      [ "$cur_limit" = "$SESSION_LIMIT" ] \
+        || "$TOOLKIT_DIR/bin/or-key" update "$KEY_HASH" --limit "$SESSION_LIMIT" >/dev/null 2>&1 || true
     fi
   fi
 fi
@@ -417,56 +405,10 @@ if [ "$HARNESS" = "shell" ]; then
   cmd_args=(bash "$@")
 fi
 
-started_epoch="$(date +%s)"
-started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
 set +e
 docker run --rm --init "${tty_args[@]}" --workdir /workspace \
   "${env_args[@]}" "${mounts[@]}" "$IMAGE" "${cmd_args[@]}"
 exit_code=$?
 set -e
-
-# shell sessions are not tracked.
-[ "$HARNESS" = "shell" ] && exit "$exit_code"
-
-ended_epoch="$(date +%s)"
-ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-duration_s=$(( ended_epoch - started_epoch ))
-
-# --- spend capture ------------------------------------------------------------
-# Per-session spend is the key's usage delta across the run.
-cost_usd="null"
-source="none"
-if [ -n "$KEY_HASH" ]; then
-  if usage_json="$("$TOOLKIT_DIR/bin/or-key" get "$KEY_HASH" 2>/dev/null)"; then
-    usage_after="$(jq -r '.usage // 0' <<<"$usage_json")"
-    cost_usd="$(jq -n --argjson a "$usage_after" --argjson b "$USAGE_BEFORE" '($a - $b) | if . < 0 then 0 else . end')"
-    source="openrouter-key"
-  fi
-fi
-
-mkdir -p "$(dirname "$SPEND_FILE")"
-jq -cn \
-  --arg session_id "$SESSION_ID" \
-  --arg harness "$HARNESS" \
-  --arg model "${MODEL:-}" \
-  --arg started_at "$started_at" \
-  --arg ended_at "$ended_at" \
-  --argjson duration_s "$duration_s" \
-  --argjson exit_code "$exit_code" \
-  --arg cwd "$WORKDIR" \
-  --arg key_hash "$KEY_HASH" \
-  --arg key_label "$KEY_LABEL" \
-  --argjson cost_usd "$cost_usd" \
-  --arg source "$source" \
-  '{session_id:$session_id, harness:$harness, model:$model,
-    started_at:$started_at, ended_at:$ended_at, duration_s:$duration_s,
-    exit_code:$exit_code, cwd:$cwd, openrouter_key_hash:$key_hash,
-    openrouter_key_label:$key_label, cost_usd:$cost_usd, source:$source}' \
-  >> "$SPEND_FILE"
-
-if [ "$cost_usd" != "null" ]; then
-  printf 'llm: session %s (%s) cost $%s\n' "$SESSION_ID" "$HARNESS" "$cost_usd" >&2
-fi
 
 exit "$exit_code"

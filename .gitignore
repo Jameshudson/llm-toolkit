@@ -4,8 +4,5 @@
 # Runtime state (sessions, auth, model caches)
 data/
 
-# Spend records (session history)
-spend/
-
 # OS noise
 .DS_Store

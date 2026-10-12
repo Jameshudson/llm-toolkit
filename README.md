@@ -1,7 +1,7 @@
 # llm-toolkit
 
 Run coding harnesses (`opencode`, `pi`) inside a container — nothing installed
-on the host — with per-session spend tracking.
+on the host.
 
 
 `llm-toolkit` builds and (optionally) publishes a small set of Docker images and
@@ -16,19 +16,17 @@ configuration and state.
   `llm-toolkit:opencode` / `llm-toolkit:pi` add one harness each.
 - **Provider keys via env.** OpenRouter and DeepSeek keys are injected as
   environment variables and never written into the repo.
-- **Spend tracking.** With an OpenRouter *management* key, `llm` keeps one
-  scoped API key per project+harness (cached in `~/.llm-toolkit/keys.json`)
-  and records each session's spend as the key's usage delta in
-  `.llm-toolkit/spend/sessions.jsonl`.
+- **Managed OpenRouter keys.** With an OpenRouter *management* key, `llm` keeps
+  one scoped API key per project+harness (cached in `~/.llm-toolkit/keys.json`),
+  optionally capped by `SESSION_LIMIT`.
 - **Per-repo customization.** Each repo can add mounts, extra tools, config
   overrides, and an on-start hook via `.llm-toolkit/`.
 
 ## Layout
 
 ```
-bin/llm         CLI: mint a session key, run the container, record spend
-bin/or-key      OpenRouter Management API helper (create/list/get/delete keys)
-bin/spend       report on sessions.jsonl (summary / list / csv)
+bin/llm         CLI: manage the OpenRouter key and run the container
+bin/or-key      OpenRouter Management API helper (create/list/get/update/delete keys)
 images/         base/, node/, opencode/, pi/ image definitions + shared entrypoint
 template/       the .llm-toolkit/ template `llm init` copies into a repo
 include.mk      optional make sugar for project repos
@@ -48,10 +46,10 @@ From a clone:
 ./install.sh          # or: make install
 ```
 
-Either way it copies the toolkit to `~/.local/share/llm-toolkit` and puts `llm`,
-`or-key`, and `spend` on PATH via wrappers in `~/.local/bin`. Override the
-location with `--prefix DIR` / `PREFIX=…`. Images build on first use, or pull
-when `LLM_REGISTRY` is set. Requires a running container runtime (OrbStack
+Either way it copies the toolkit to `~/.local/share/llm-toolkit` and puts `llm`
+and `or-key` on PATH via wrappers in `~/.local/bin`. Override the location with
+`--prefix DIR` / `PREFIX=…`. Images build on first use, or pull when
+`LLM_REGISTRY` is set. Requires a running container runtime (OrbStack
 recommended: `brew install --cask orbstack`).
 
 ### Uninstall
@@ -105,7 +103,7 @@ layers with `make build-base`, `make build-node`, `make build-opencode`,
 
 | Variable | Purpose |
 |---|---|
-| `OPENROUTER_MANAGEMENT_KEY` | Admin key from <https://openrouter.ai/settings/management-keys>. Enables spend tracking (one scoped key per project+harness). Cannot make inference calls. |
+| `OPENROUTER_MANAGEMENT_KEY` | Admin key from <https://openrouter.ai/settings/management-keys>. One scoped API key per project+harness. Cannot make inference calls. |
 | `OPENROUTER_API_KEY` | Fallback inference key when no management key is set. |
 | `DEEPSEEK_API_KEY` | Injected as-is. DeepSeek has no key-management API, so keys are created in their web UI. |
 | `SESSION_LIMIT` | USD credit limit applied to the managed key (default `$5`). Empty = no limit; changing it re-syncs the existing key's limit. |
@@ -140,7 +138,6 @@ the project-owned `config/`, a `README.md`, and `.env.example` → `.env`.
 ```gitignore
 .llm-toolkit/.env
 .llm-toolkit/data/
-.llm-toolkit/spend/
 ```
 
 That's the whole integration — no submodule, no vendored files. `llm` finds the
@@ -153,7 +150,7 @@ Optional make sugar — add one line to the repo's Makefile:
 ```
 
 then `make llm-opencode`, `make llm-pi`, `make llm-shell`, `make llm-run
-HARNESS=pi ARGS="..."`, `make llm-spend`.
+HARNESS=pi ARGS="..."`.
 
 ### What `llm init` creates
 
@@ -162,12 +159,11 @@ HARNESS=pi ARGS="..."`, `make llm-spend`.
 ├── .env                 keys and defaults (gitignored)
 ├── README.md            what each file is
 ├── config/              opencode/pi config for this project (commit it)
-├── data/                harness sessions, auth, caches (gitignored)
-└── spend/sessions.jsonl (gitignored)
+└── data/                harness sessions, auth, caches (gitignored)
 ```
 
-Everything except `.env`, `data/`, and `spend/` is meant to be committed.
-Optional `mounts`, `Dockerfile`, and `on-start.sh` files (documented in
+Everything except `.env` and `data/` is meant to be committed. Optional
+`mounts`, `Dockerfile`, and `on-start.sh` files (documented in
 `.llm-toolkit/README.md`) are created on demand.
 
 ## Per-repo customization
@@ -229,54 +225,19 @@ llm opencode WORKDIR=~/x        # run against another directory
 MODEL=openrouter/deepseek/deepseek-v4.1-flash llm pi
 ```
 
-## Spend tracking
-
-Each session writes one JSONL record to `.llm-toolkit/spend/sessions.jsonl`:
-
-```json
-{"session_id":"20261012T134501Z-1234-5678","harness":"opencode",
- "model":"openrouter/deepseek/deepseek-v4.1-flash","started_at":"...",
- "ended_at":"...","duration_s":412,"exit_code":0,"cwd":"/path",
- "openrouter_key_hash":"...","openrouter_key_label":"llm-toolkit/<host>/<project>/opencode",
- "cost_usd":0.0341,"source":"openrouter-key"}
-```
-
-```sh
-spend                 # totals, by harness, by model, by day
-spend list -n 50
-spend csv             # -> .llm-toolkit/spend/sessions.csv
-```
-
-Spend comes from the managed OpenRouter key's `usage`: `llm` reads it before and
-after the run and records the delta, harness-agnostic (works through opencode,
-pi, or a subagent). It requires routing inference through OpenRouter (the default
-`openrouter/deepseek/*` models do).
-
-**Caveats**
-
-- Direct DeepSeek calls are **not** attributed per session — DeepSeek exposes no
-  per-key usage API. `source` is `none` and `cost_usd` is `null`.
-- Without `OPENROUTER_MANAGEMENT_KEY`, sessions fall back to `OPENROUTER_API_KEY`
-  and are recorded unpriced.
-- The key is reused per project+harness, so **concurrent** sessions in the same
-  project share it and their deltas can overlap. The cached secret lives in
-  `~/.llm-toolkit/keys.json` (`0600`, outside any repo); if it's lost, the key is
-  recreated.
-- Key `usage` is read at session exit; a request still in flight may not be
-  reflected.
-- `llm shell` sessions are not recorded.
-
 ## Managing keys
 
 ```sh
 or-key create --name my-key [--limit 10] [--reset daily] [--raw]
 or-key list
 or-key get <hash>
+or-key update <hash> [--limit 10]
 or-key delete <hash>
 ```
 
-`llm` creates keys named `llm-toolkit/<harness>/<session-id>` and leaves them in
-place so usage stays queryable. Clean up old ones with `or-key list` and
+`llm` keeps one key per project+harness, named
+`llm-toolkit/<host>/<project>/<harness>`, and reuses it (the secret is cached in
+`~/.llm-toolkit/keys.json`). Clean up old ones with `or-key list` and
 `or-key delete`.
 
 ## Notes

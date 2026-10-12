@@ -1,9 +1,8 @@
-# llm-toolkit — build/publish the harness images and run them with per-session
-# spend tracking.
+# llm-toolkit — build/publish the harness images and run them.
 #
 #   make build                  build base + node + harness images (and repo image)
 #   make publish                build and push all images to $(LLM_REGISTRY)
-#   make install                install the llm/or-key/spend CLI into $(PREFIX)/bin
+#   make install                install the llm/or-key CLI into $(PREFIX)/bin
 #   make uninstall              remove the installed CLI
 #   make init                   create .env + state dir in this repo
 #   make config                 copy toolkit config into the repo for customization
@@ -12,7 +11,6 @@
 #   make shell                  a shell inside the base image
 #   make run HARNESS=pi ARGS="summarise this repo"
 #   make keys / key-create / key-delete
-#   make spend / spend-csv
 #
 # Set LLM_REGISTRY=ghcr.io/<you>/ to build and publish registry-tagged images;
 # leave empty for local tags. Repos consume the images via the installed CLI and
@@ -29,7 +27,7 @@ ifeq ($(REPO_ROOT),)
 REPO_ROOT := $(TOOLKIT_DIR)
 endif
 
-# State (.env, data/, spend/) lives in the repo; standalone, in the toolkit.
+# State (.env, data/) lives in the repo; standalone, in the toolkit.
 ifeq ($(REPO_ROOT),$(TOOLKIT_DIR))
 STATE_DIR ?= $(REPO_ROOT)
 else
@@ -57,10 +55,10 @@ LOADENV := set -a; for f in "$(TOOLKIT_DIR)/.env" "$(STATE_DIR)/.env"; do [ -f "
 export WORKDIR TERM LLM_REGISTRY
 export LLM_STATE_DIR := $(STATE_DIR)
 
-.PHONY: help build build-base build-node build-opencode build-pi publish check-registry install uninstall init config opencode pi shell run keys key-create key-delete spend spend-csv clean
+.PHONY: help build build-base build-node build-opencode build-pi publish check-registry install uninstall init config opencode pi shell run keys key-create key-delete clean
 
 help:
-	@sed -n '4,19p' $(MAKEFILE_LIST) | sed 's/^# \{0,1\}//'
+	@sed -n '3,17p' $(MAKEFILE_LIST) | sed 's/^# \{0,1\}//'
 
 build: build-base build-node build-opencode build-pi
 	@if [ -f "$(STATE_DIR)/Dockerfile" ]; then \
@@ -107,7 +105,7 @@ uninstall:
 init:
 	@mkdir -p "$(STATE_DIR)/data"
 	@if [ ! -f "$(STATE_DIR)/.env" ]; then cp "$(TOOLKIT_DIR)/template/.env.example" "$(STATE_DIR)/.env"; echo "created $(STATE_DIR)/.env"; else echo "kept existing $(STATE_DIR)/.env"; fi
-	@if [ "$(STATE_DIR)" = "$(TOOLKIT_DIR)" ]; then echo "add to .gitignore: .env, /data/, /spend/"; else echo "add to .gitignore: $(patsubst $(REPO_ROOT)/%,%,$(STATE_DIR))/"; fi
+	@if [ "$(STATE_DIR)" = "$(TOOLKIT_DIR)" ]; then echo "add to .gitignore: .env, /data/"; else echo "add to .gitignore: $(patsubst $(REPO_ROOT)/%,%,$(STATE_DIR))/"; fi
 
 config:
 	@mkdir -p "$(STATE_DIR)/config"
@@ -135,11 +133,5 @@ key-create:
 key-delete:
 	@$(LOADENV) "$(TOOLKIT_DIR)/bin/or-key" delete "$(HASH)"
 
-spend:
-	@LLM_STATE_DIR="$(STATE_DIR)" python3 "$(TOOLKIT_DIR)/bin/spend" summary
-
-spend-csv:
-	@LLM_STATE_DIR="$(STATE_DIR)" python3 "$(TOOLKIT_DIR)/bin/spend" csv
-
 clean:
-	rm -rf "$(STATE_DIR)/data" "$(STATE_DIR)/spend"
+	rm -rf "$(STATE_DIR)/data"

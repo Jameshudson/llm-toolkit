@@ -31,7 +31,7 @@ say() { printf '%s\n' "$*"; }
 say "llm-toolkit uninstaller"
 say
 
-for c in llm or-key spend; do
+for c in llm or-key; do
   if [ -e "$BIN/$c" ]; then rm -f "$BIN/$c"; say "  removed $BIN/$c"; fi
 done
 if [ -d "$DEST" ]; then rm -rf "$DEST"; say "  removed $DEST"; fi

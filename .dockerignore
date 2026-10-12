@@ -2,7 +2,6 @@
 template
 .env
 data
-spend
 README.md
 Makefile
 install.sh

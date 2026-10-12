@@ -13,8 +13,8 @@
 #   LLM_REPO   GitHub owner/repo                      --repo owner/repo
 #   LLM_REF    branch or tag (default main)           --ref REF
 #
-# Copies the toolkit to <prefix>/share/llm-toolkit and puts `llm`, `or-key`, and
-# `spend` on PATH via wrappers in <prefix>/bin. Remove with ./uninstall.sh.
+# Copies the toolkit to <prefix>/share/llm-toolkit and puts `llm` and `or-key`
+# on PATH via wrappers in <prefix>/bin. Remove with ./uninstall.sh.
 set -euo pipefail
 
 REPO="${LLM_REPO:-Jameshudson/llm-toolkit}"
@@ -46,7 +46,6 @@ if ! command -v docker >/dev/null 2>&1; then
 elif ! docker info >/dev/null 2>&1; then
   say "  ! docker daemon not reachable — start your container runtime before running llm"
 fi
-command -v python3 >/dev/null 2>&1 || say "  ! python3 not found — the 'spend' command needs it"
 
 # --- source the toolkit: a local clone, else download it ----------------------
 tmp=""
@@ -82,11 +81,11 @@ done
 say "  installed toolkit to $DEST"
 
 # --- wrappers -----------------------------------------------------------------
-for c in llm or-key spend; do
+for c in llm or-key; do
   printf '#!/usr/bin/env bash\nexec "%s/bin/%s" "$@"\n' "$DEST" "$c" > "$BIN/$c"
   chmod +x "$BIN/$c"
 done
-say "  installed: $BIN/{llm,or-key,spend}"
+say "  installed: $BIN/{llm,or-key}"
 
 # --- PATH ---------------------------------------------------------------------
 case ":$PATH:" in
