@@ -45,15 +45,73 @@ else
   STATE_DIR="${LLM_STATE_DIR:-$REPO_ROOT/.llm-toolkit}"
 fi
 
-# Load .env — toolkit first, state dir last (state wins).
-for f in "$TOOLKIT_DIR/.env" "$STATE_DIR/.env"; do
-  if [ -f "$f" ]; then
-    set -a
-    # shellcheck disable=SC1090,SC1091
-    . "$f"
-    set +a
+# Load .env files. The environment wins: a variable already set (exported in
+# your shell or CI) is not overridden by the file. Loaded toolkit first, then
+# the state dir.
+load_env() {
+  local f="$1" line key val
+  [ -f "$f" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in ''|\#*) continue ;; esac
+    case "$line" in *=*) ;; *) continue ;; esac
+    key="${line%%=*}"; val="${line#*=}"
+    case "$key" in ''|*[!A-Za-z0-9_]*) continue ;; esac
+    printenv "$key" >/dev/null 2>&1 && continue
+    val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
+    [ -n "$val" ] || continue
+    export "$key=$val"
+  done < "$f"
+}
+load_env "$TOOLKIT_DIR/.env"
+load_env "$STATE_DIR/.env"
+
+# Global, user-level settings (secrets shared across repos). Lowest precedence:
+# the environment and the repo's .env win over it.
+GLOBAL_DIR="${LLM_HOME:-$HOME/.llm-toolkit}"
+GLOBAL_SETTINGS="$GLOBAL_DIR/settings.json"
+
+load_settings() {
+  local f="$1" key val
+  [ -f "$f" ] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  while IFS=$'\t' read -r key val; do
+    case "$key" in ''|*[!A-Za-z0-9_]*) continue ;; esac
+    printenv "$key" >/dev/null 2>&1 && continue
+    [ -n "$val" ] || continue
+    export "$key=$val"
+  done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' "$f" 2>/dev/null)
+}
+load_settings "$GLOBAL_SETTINGS"
+
+# Store a value in the global settings file (0600), creating it if needed.
+save_setting() {
+  local key="$1" val="$2" tmp
+  command -v jq >/dev/null 2>&1 || { echo "llm: jq not found; not saving $key" >&2; return 0; }
+  mkdir -p "$GLOBAL_DIR"; chmod 700 "$GLOBAL_DIR" 2>/dev/null || true
+  tmp="$GLOBAL_SETTINGS.tmp.$$"
+  if [ -f "$GLOBAL_SETTINGS" ]; then
+    jq --arg k "$key" --arg v "$val" '.[$k] = $v' "$GLOBAL_SETTINGS" > "$tmp"
+  else
+    jq -n --arg k "$key" --arg v "$val" '{($k): $v}' > "$tmp"
   fi
-done
+  mv "$tmp" "$GLOBAL_SETTINGS"
+  chmod 600 "$GLOBAL_SETTINGS" 2>/dev/null || true
+  echo "llm: saved $key to $GLOBAL_SETTINGS" >&2
+}
+
+# Prompt for a key (hidden input) and store it globally. No-op when not a TTY.
+prompt_key() {
+  local key="$1" label="$2" val=""
+  [ -t 0 ] || return 1
+  printf 'llm: %s is not set. Enter %s (hidden): ' "$key" "$label" >&2
+  IFS= read -rs val || true
+  printf '\n' >&2
+  [ -n "$val" ] || return 1
+  export "$key=$val"
+  save_setting "$key" "$val"
+  return 0
+}
 
 # The template `llm init` copies into a repo, and the fallback config.
 TEMPLATE="$TOOLKIT_DIR/template"
@@ -155,6 +213,40 @@ if [ -n "$MODEL" ] && [ "$HARNESS" != "shell" ]; then
     case "$a" in --model|-m|--model=*) has_model=1 ;; esac
   done
   [ "$has_model" = 1 ] || set -- --model "$MODEL" "$@"
+fi
+
+# --- provider key pre-flight --------------------------------------------------
+# Fail fast rather than launching a container that can't authenticate. The
+# provider is read from the harness config; unknown providers are not checked.
+# Bypass with LLM_SKIP_KEY_CHECK=1 (e.g. when you authenticated another way).
+if [ "$HARNESS" != "shell" ] && [ "${LLM_SKIP_KEY_CHECK:-0}" != "1" ]; then
+  case "$HARNESS" in
+    opencode) cfg="$CONFIG_OPENCODE/opencode.jsonc" ;;
+    pi)       cfg="$CONFIG_PI/settings.json" ;;
+    *)        cfg="" ;;
+  esac
+  provider=""
+  if [ -n "$cfg" ] && [ -f "$cfg" ]; then
+    provider="$(sed -n 's/.*"model"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p; s/.*"defaultProvider"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$cfg" | head -1)"
+    provider="${provider%%/*}"
+  fi
+  case "$provider" in
+    openrouter)
+      if [ -z "${OPENROUTER_MANAGEMENT_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ]; then
+        prompt_key OPENROUTER_MANAGEMENT_KEY "OpenRouter management key (https://openrouter.ai/settings/management-keys)" \
+          || prompt_key OPENROUTER_API_KEY "OpenRouter API key" \
+          || die "no OpenRouter key: set OPENROUTER_MANAGEMENT_KEY or OPENROUTER_API_KEY in $STATE_DIR/.env or $GLOBAL_SETTINGS (bypass with LLM_SKIP_KEY_CHECK=1)"
+      fi ;;
+    deepseek)
+      [ -n "${DEEPSEEK_API_KEY:-}" ] || prompt_key DEEPSEEK_API_KEY "DeepSeek API key" \
+        || die "no DeepSeek key: set DEEPSEEK_API_KEY in $STATE_DIR/.env or $GLOBAL_SETTINGS (bypass with LLM_SKIP_KEY_CHECK=1)" ;;
+    anthropic)
+      [ -n "${ANTHROPIC_API_KEY:-}" ] || prompt_key ANTHROPIC_API_KEY "Anthropic API key" \
+        || die "no Anthropic key: set ANTHROPIC_API_KEY in $STATE_DIR/.env or $GLOBAL_SETTINGS (bypass with LLM_SKIP_KEY_CHECK=1)" ;;
+    openai)
+      [ -n "${OPENAI_API_KEY:-}" ] || prompt_key OPENAI_API_KEY "OpenAI API key" \
+        || die "no OpenAI key: set OPENAI_API_KEY in $STATE_DIR/.env or $GLOBAL_SETTINGS (bypass with LLM_SKIP_KEY_CHECK=1)" ;;
+  esac
 fi
 
 # --- image --------------------------------------------------------------------

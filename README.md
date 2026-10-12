@@ -103,6 +103,17 @@ layers with `make build-base`, `make build-node`, `make build-opencode`,
 | `SESSION_LIMIT` | Optional USD credit limit applied to each per-session OpenRouter key. |
 | `LLM_SESSION_KEYS` | `0` disables per-session key minting. |
 
+Keys are resolved in this order (first wins): the environment, the repo's
+`.llm-toolkit/.env`, then a global `~/.llm-toolkit/settings.json`. Put shared
+secrets (like `OPENROUTER_MANAGEMENT_KEY`) in the global file so you don't repeat
+them per repo; override `LLM_HOME` to relocate it.
+
+Before launching, `llm` reads the provider from the harness config and **refuses
+to start** if its key is missing. If you're in a terminal it prompts for the key
+(hidden) and saves it to the global file; otherwise it prints what to set.
+Bypass with `LLM_SKIP_KEY_CHECK=1` (e.g. when you authenticated another way).
+`llm shell` is not checked.
+
 ## Use in a project repo
 
 From anywhere inside a git repo:

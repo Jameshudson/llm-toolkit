@@ -16,6 +16,15 @@ set -euo pipefail
 
 BASE="https://openrouter.ai/api/v1"
 
+# Fall back to a globally stored management key (~/.llm-toolkit/settings.json).
+if [ -z "${OPENROUTER_MANAGEMENT_KEY:-}" ]; then
+  _gs="${LLM_HOME:-$HOME/.llm-toolkit}/settings.json"
+  if [ -f "$_gs" ] && command -v jq >/dev/null 2>&1; then
+    OPENROUTER_MANAGEMENT_KEY="$(jq -r '.OPENROUTER_MANAGEMENT_KEY // empty' "$_gs" 2>/dev/null)"
+    export OPENROUTER_MANAGEMENT_KEY
+  fi
+fi
+
 usage() {
   sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
