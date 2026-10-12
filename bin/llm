@@ -406,11 +406,17 @@ ON_START="$STATE_DIR/image/on-start.sh"
 [ -f "$ON_START" ] || ON_START="$STATE_DIR/on-start.sh"
 [ -f "$ON_START" ] && mounts+=(-v "$ON_START:/opt/llm-toolkit/on-start.sh:ro")
 
-# Forward the host SSH agent if we can find the socket.
-AGENT_SOCK="${SSH_AUTH_SOCK:-}"
-[ -S /run/host-services/ssh-auth.sock ] && AGENT_SOCK=/run/host-services/ssh-auth.sock
+# Forward the host SSH agent. On macOS, Docker Desktop/OrbStack intercept the
+# magic path /run/host-services/ssh-auth.sock (it need not exist on the host); on
+# Linux, mount the real SSH_AUTH_SOCK.
+AGENT_SOCK=""
+if [ "$(uname -s)" = "Darwin" ]; then
+  AGENT_SOCK=/run/host-services/ssh-auth.sock
+elif [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
+  AGENT_SOCK="$SSH_AUTH_SOCK"
+fi
 env_args=(-e "TERM=${TERM:-xterm-256color}" -e "XDG_DATA_HOME=/root/.local/share")
-if [ -n "$AGENT_SOCK" ] && [ -S "$AGENT_SOCK" ]; then
+if [ -n "$AGENT_SOCK" ]; then
   mounts+=(-v "$AGENT_SOCK:/agent.sock")
   env_args+=(-e "SSH_AUTH_SOCK=/agent.sock")
 fi
