@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# or-key — manage OpenRouter API keys via the Management API.
+#
+# Requires OPENROUTER_MANAGEMENT_KEY (https://openrouter.ai/settings/management-keys).
+# Management keys cannot make completion calls; they only administer keys.
+#
+# Usage:
+#   or-key create --name NAME [--limit USD] [--reset daily|weekly|monthly] [--raw]
+#   or-key list [--offset N]
+#   or-key get HASH
+#   or-key delete HASH
+#
+# `create` prints the full JSON response unless --raw is given, in which case it
+# prints only the secret key. bin/llm uses `create` to mint one key per session.
+set -euo pipefail
+
+BASE="https://openrouter.ai/api/v1"
+
+usage() {
+  sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+api() {
+  : "${OPENROUTER_MANAGEMENT_KEY:?set OPENROUTER_MANAGEMENT_KEY (an OpenRouter management key)}"
+  local method="$1" path="$2" body="${3:-}"
+  local args=(-sS --fail-with-body -X "$method"
+    -H "Authorization: Bearer ${OPENROUTER_MANAGEMENT_KEY}"
+    -H "Content-Type: application/json")
+  [ -n "$body" ] && args+=(-d "$body")
+  curl "${args[@]}" "${BASE}${path}"
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  create)
+    name="" limit="" reset=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --name)  name="${2:?--name needs a value}"; shift 2 ;;
+        --limit) limit="${2:?--limit needs a value}"; shift 2 ;;
+        --reset) reset="${2:?--reset needs a value}"; shift 2 ;;
+        --raw)   raw=1; shift ;;
+        -h|--help) usage 0 ;;
+        *) echo "or-key: unknown flag: $1" >&2; usage 1 ;;
+      esac
+    done
+    [ -n "$name" ] || { echo "or-key create: --name is required" >&2; exit 1; }
+
+    body="$(jq -n --arg n "$name" '{name:$n}')"
+    [ -n "$limit" ] && body="$(jq -c --argjson l "$limit" '. + {limit:$l}' <<<"$body")"
+    [ -n "$reset" ] && body="$(jq -c --arg r "$reset" '. + {limit_reset:$r}' <<<"$body")"
+
+    resp="$(api POST /keys "$body")"
+    if [ -n "${raw:-}" ]; then
+      jq -r '.key // .data.key' <<<"$resp"
+    else
+      jq '.' <<<"$resp"
+    fi
+    ;;
+
+  list)
+    offset=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --offset) offset="${2:?--offset needs a value}"; shift 2 ;;
+        -h|--help) usage 0 ;;
+        *) echo "or-key: unknown flag: $1" >&2; usage 1 ;;
+      esac
+    done
+    path="/keys"; [ -n "$offset" ] && path="/keys?offset=${offset}"
+    api GET "$path" | jq '.data // .'
+    ;;
+
+  get)
+    hash="${1:?or-key get HASH}"
+    api GET "/keys/${hash}" | jq '.data // .'
+    ;;
+
+  delete)
+    hash="${1:?or-key delete HASH}"
+    api DELETE "/keys/${hash}" | jq '.' 2>/dev/null || echo '{"deleted":true}'
+    ;;
+
+  ''|-h|--help|help)
+    usage 0
+    ;;
+
+  *)
+    echo "or-key: unknown command: $cmd" >&2
+    usage 1
+    ;;
+esac

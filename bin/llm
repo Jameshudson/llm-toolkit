@@ -1,0 +1,311 @@
+#!/usr/bin/env bash
+# llm — launch a coding harness inside the llm-toolkit container and record the
+# session's spend.
+#
+# Usage:
+#   llm init                          # create this repo's .llm-toolkit/ state dir
+#   llm opencode [opencode args...]   # interactive opencode TUI
+#   llm pi [pi args...]               # interactive pi
+#   llm shell                         # bash inside the container
+#   llm run --harness pi "prompt"     # convenience one-shot
+#
+# Per-repo customization (all optional, read from the state dir):
+#   .env          keys and defaults (see .env.example)
+#   mounts        extra docker mounts, one "host:container[:ro]" per line
+#   Dockerfile    derived image FROM ${LLM_REGISTRY}llm-toolkit:${HARNESS}
+#   on-start.sh   run inside the container before the harness starts
+#   config/       opencode/pi config overriding the toolkit defaults
+#
+# Images are pulled from LLM_REGISTRY when set, and built from this toolkit's
+# Dockerfiles otherwise (or as a fallback).
+#
+# Per-session spend: when OPENROUTER_MANAGEMENT_KEY is set (and LLM_SESSION_KEYS
+# is not 0), a fresh OpenRouter API key is minted for this session, injected as
+# OPENROUTER_API_KEY, and its usage is read back at exit. One JSONL record is
+# appended to spend/sessions.jsonl. See the README for the DeepSeek caveat.
+set -euo pipefail
+
+# LLM_TOOLKIT_DIR lets an installed CLI point back at its data dir.
+TOOLKIT_DIR="${LLM_TOOLKIT_DIR:-}"
+[ -n "$TOOLKIT_DIR" ] || TOOLKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Resolve the enclosing repo. If the toolkit lives inside a git repo (e.g. a
+# clone) that is the repo; otherwise fall back to the toolkit dir itself.
+REPO_ROOT="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$REPO_ROOT" ] || REPO_ROOT="$(git -C "$TOOLKIT_DIR" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
+[ -n "$REPO_ROOT" ] || REPO_ROOT="$(git -C "$TOOLKIT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$REPO_ROOT" ] || REPO_ROOT="$TOOLKIT_DIR"
+
+# State (.env, data/, spend/) lives in the repo. Only when the toolkit IS the
+# repo (standalone use) does it fall back to the toolkit dir.
+if [ "$REPO_ROOT" = "$TOOLKIT_DIR" ]; then
+  STATE_DIR="${LLM_STATE_DIR:-$REPO_ROOT}"
+else
+  STATE_DIR="${LLM_STATE_DIR:-$REPO_ROOT/.llm-toolkit}"
+fi
+
+# Load .env — toolkit first, state dir last (state wins).
+for f in "$TOOLKIT_DIR/.env" "$STATE_DIR/.env"; do
+  if [ -f "$f" ]; then
+    set -a
+    # shellcheck disable=SC1090,SC1091
+    . "$f"
+    set +a
+  fi
+done
+
+# Harness config: prefer a per-repo override, else the toolkit defaults.
+CONFIG_OPENCODE="$STATE_DIR/config/opencode"
+[ -d "$CONFIG_OPENCODE" ] || CONFIG_OPENCODE="$TOOLKIT_DIR/config/opencode"
+CONFIG_PI="$STATE_DIR/config/pi/agent"
+[ -d "$CONFIG_PI" ] || CONFIG_PI="$TOOLKIT_DIR/config/pi/agent"
+
+# Image refs. LLM_REGISTRY is the prefix before "llm-toolkit", e.g.
+# "ghcr.io/you/" (trailing slash). Empty means local tags. LLM_IMAGE overrides
+# the harness image entirely.
+REGISTRY="${LLM_REGISTRY:-}"
+img() { printf '%s' "${REGISTRY}llm-toolkit:$1"; }
+
+WORKDIR="${WORKDIR:-$REPO_ROOT}"
+LLM_SESSION_KEYS="${LLM_SESSION_KEYS:-1}"
+SPEND_FILE="$STATE_DIR/spend/sessions.jsonl"
+export LLM_STATE_DIR="$STATE_DIR"
+
+die() { echo "llm: $*" >&2; exit 1; }
+
+usage() {
+  sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+# --- harness + args -----------------------------------------------------------
+HARNESS="${1:-}"
+[ -n "$HARNESS" ] || usage 1
+shift
+
+if [ "$HARNESS" = "run" ]; then
+  HARNESS=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --harness) HARNESS="${2:?--harness needs a value}"; shift 2 ;;
+      --model)   MODEL="${2:?--model needs a value}"; shift 2 ;;
+      *) break ;;
+    esac
+  done
+  [ -n "$HARNESS" ] || die "run: --harness is required"
+fi
+
+# `llm init` bootstraps a repo's state dir.
+if [ "$HARNESS" = "init" ]; then
+  mkdir -p "$STATE_DIR/data"
+  if [ ! -f "$STATE_DIR/.env" ]; then
+    cp "$TOOLKIT_DIR/.env.example" "$STATE_DIR/.env"
+    echo "created $STATE_DIR/.env"
+  else
+    echo "kept existing $STATE_DIR/.env"
+  fi
+  echo "state dir: $STATE_DIR"
+  echo "add to .gitignore:"
+  if [ "$STATE_DIR" = "$REPO_ROOT" ]; then
+    echo "  .env"; echo "  /data/"; echo "  /spend/"
+  else
+    echo "  ${STATE_DIR#"$REPO_ROOT"/}/"
+  fi
+  exit 0
+fi
+
+case "$HARNESS" in
+  opencode|pi|shell) ;;
+  -h|--help|help) usage 0 ;;
+  *) die "unknown harness: $HARNESS (expected 'opencode', 'pi', or 'shell')" ;;
+esac
+
+[ -d "$WORKDIR" ] || die "WORKDIR does not exist: $WORKDIR"
+
+# Prepend the model if the caller asked for one and didn't pass it themselves.
+MODEL="${MODEL:-}"
+if [ -n "$MODEL" ] && [ "$HARNESS" != "shell" ]; then
+  has_model=0
+  for a in "$@"; do
+    case "$a" in --model|-m|--model=*) has_model=1 ;; esac
+  done
+  [ "$has_model" = 1 ] || set -- --model "$MODEL" "$@"
+fi
+
+# --- image --------------------------------------------------------------------
+# Base toolchain, then the harness image, then an optional per-repo derived
+# image. A repo Dockerfile picks its FROM via ARG HARNESS (default base):
+#   ARG LLM_REGISTRY=
+#   ARG HARNESS=base
+#   FROM ${LLM_REGISTRY}llm-toolkit:${HARNESS}
+SLUG="$(basename "$REPO_ROOT" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')"
+HARNESS_FOR_IMAGE="$HARNESS"
+[ "$HARNESS" = "shell" ] && HARNESS_FOR_IMAGE="base"
+
+have() { docker image inspect "$1" >/dev/null 2>&1; }
+
+# Pull the image if the registry is configured; otherwise (or on pull failure)
+# build it from the toolkit's Dockerfile. $2 is the Dockerfile, $3.. are extra
+# build args.
+fetch() {
+  local ref="$1" df="$2"; shift 2
+  have "$ref" && return 0
+  if [ -n "$REGISTRY" ]; then
+    echo "llm: pulling $ref ..." >&2
+    docker pull "$ref" && return 0
+    echo "llm: pull failed; falling back to a local build" >&2
+  fi
+  [ -f "$df" ] || die "image $ref not present and no Dockerfile to build it"
+  echo "llm: building $ref ..." >&2
+  docker build -f "$df" -t "$ref" "$@" "$TOOLKIT_DIR" >&2
+}
+
+ensure_base() {
+  fetch "$(img base)" "$TOOLKIT_DIR/container/base/Dockerfile"
+}
+
+ensure_node() {
+  fetch "$(img node)" "$TOOLKIT_DIR/container/node/Dockerfile" \
+    --build-arg "BASE_REF=$(img base)"
+}
+
+ensure_harness() {
+  local h="$1"
+  [ "$h" = "base" ] && { ensure_base; return 0; }
+  fetch "$(img "$h")" "$TOOLKIT_DIR/container/${h}/Dockerfile" \
+    --build-arg "NODE_REF=$(img node)"
+}
+
+if [ -n "${LLM_IMAGE:-}" ]; then
+  IMAGE="$LLM_IMAGE"
+elif [ -f "$STATE_DIR/Dockerfile" ]; then
+  IMAGE="llm-toolkit:repo-${SLUG}-${HARNESS_FOR_IMAGE}"
+  ensure_harness "$HARNESS_FOR_IMAGE"
+  if ! have "$IMAGE"; then
+    echo "llm: building $IMAGE from $STATE_DIR/Dockerfile ..." >&2
+    docker build -f "$STATE_DIR/Dockerfile" \
+      --build-arg "LLM_REGISTRY=$REGISTRY" --build-arg "HARNESS=$HARNESS_FOR_IMAGE" \
+      -t "$IMAGE" "$STATE_DIR" >&2
+  fi
+else
+  IMAGE="$(img "$HARNESS_FOR_IMAGE")"
+  ensure_harness "$HARNESS_FOR_IMAGE"
+fi
+
+# --- session identity ---------------------------------------------------------
+SESSION_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM}"
+KEY_HASH=""
+KEY_LABEL=""
+
+# --- per-session OpenRouter key (interactive/one-shot harnesses only) ---------
+if [ "$HARNESS" != "shell" ] && [ "$LLM_SESSION_KEYS" != "0" ] && [ -n "${OPENROUTER_MANAGEMENT_KEY:-}" ]; then
+  KEY_LABEL="llm-toolkit/${HARNESS}/${SESSION_ID}"
+  create_args=(--name "$KEY_LABEL")
+  [ -n "${SESSION_LIMIT:-}" ] && create_args+=(--limit "$SESSION_LIMIT")
+  if resp="$("$TOOLKIT_DIR/bin/or-key" create "${create_args[@]}" 2>/dev/null)"; then
+    OPENROUTER_API_KEY="$(jq -r '.key // .data.key' <<<"$resp")"
+    KEY_HASH="$(jq -r '.data.hash // .hash // empty' <<<"$resp")"
+    export OPENROUTER_API_KEY
+  else
+    echo "llm: warning: could not mint per-session key; falling back to OPENROUTER_API_KEY" >&2
+  fi
+fi
+
+# --- docker mounts ------------------------------------------------------------
+mounts=(
+  -v "$WORKDIR:/workspace"
+  -v "$CONFIG_OPENCODE:/root/.config/opencode:ro"
+  -v "$STATE_DIR/data/opencode:/root/.local/share/opencode"
+  -v "$CONFIG_PI:/opt/pi-config:ro"
+  -v "$STATE_DIR/data/pi/agent:/root/.pi/agent"
+)
+[ -d "$HOME/.ssh" ] && mounts+=(-v "$HOME/.ssh:/root/.ssh-host:ro")
+[ -f "$HOME/.gitconfig" ] && mounts+=(-v "$HOME/.gitconfig:/etc/gitconfig:ro")
+
+# Per-repo extra mounts from $STATE_DIR/mounts. One "host:container[:opts]" per
+# line; '#' comments and blank lines ignored; a leading ~ expands to $HOME.
+MOUNTS_FILE="$STATE_DIR/mounts"
+if [ -f "$MOUNTS_FILE" ]; then
+  while IFS= read -r m || [ -n "$m" ]; do
+    m="${m%%$'\r'}"
+    case "$m" in ''|\#*) continue ;; esac
+    m="${m/#\~/$HOME}"
+    case "$m" in /*) ;; *) m="$REPO_ROOT/$m" ;; esac
+    mounts+=(-v "$m")
+  done < "$MOUNTS_FILE"
+fi
+
+# Per-repo on-start hook, run inside the container before the harness.
+[ -f "$STATE_DIR/on-start.sh" ] && mounts+=(-v "$STATE_DIR/on-start.sh:/opt/llm-toolkit/on-start.sh:ro")
+
+# Forward the host SSH agent if we can find the socket.
+AGENT_SOCK="${SSH_AUTH_SOCK:-}"
+[ -S /run/host-services/ssh-auth.sock ] && AGENT_SOCK=/run/host-services/ssh-auth.sock
+env_args=(-e "TERM=${TERM:-xterm-256color}" -e "XDG_DATA_HOME=/root/.local/share")
+if [ -n "$AGENT_SOCK" ] && [ -S "$AGENT_SOCK" ]; then
+  mounts+=(-v "$AGENT_SOCK:/agent.sock")
+  env_args+=(-e "SSH_AUTH_SOCK=/agent.sock")
+fi
+[ -n "${OPENROUTER_API_KEY:-}" ] && env_args+=(-e "OPENROUTER_API_KEY=$OPENROUTER_API_KEY")
+[ -n "${DEEPSEEK_API_KEY:-}" ] && env_args+=(-e "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY")
+
+# --- run ----------------------------------------------------------------------
+tty_args=(-i)
+[ -t 0 ] && tty_args=(-it)
+
+cmd_args=("$HARNESS" "$@")
+if [ "$HARNESS" = "shell" ]; then
+  cmd_args=(bash "$@")
+fi
+
+started_epoch="$(date +%s)"
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+set +e
+docker run --rm --init "${tty_args[@]}" --workdir /workspace \
+  "${env_args[@]}" "${mounts[@]}" "$IMAGE" "${cmd_args[@]}"
+exit_code=$?
+set -e
+
+# shell sessions are not tracked.
+[ "$HARNESS" = "shell" ] && exit "$exit_code"
+
+ended_epoch="$(date +%s)"
+ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+duration_s=$(( ended_epoch - started_epoch ))
+
+# --- spend capture ------------------------------------------------------------
+cost_usd="null"
+source="none"
+if [ -n "$KEY_HASH" ]; then
+  if usage_json="$("$TOOLKIT_DIR/bin/or-key" get "$KEY_HASH" 2>/dev/null)"; then
+    cost_usd="$(jq -r '.usage // 0' <<<"$usage_json")"
+    source="openrouter-key"
+  fi
+fi
+
+mkdir -p "$(dirname "$SPEND_FILE")"
+jq -cn \
+  --arg session_id "$SESSION_ID" \
+  --arg harness "$HARNESS" \
+  --arg model "${MODEL:-}" \
+  --arg started_at "$started_at" \
+  --arg ended_at "$ended_at" \
+  --argjson duration_s "$duration_s" \
+  --argjson exit_code "$exit_code" \
+  --arg cwd "$WORKDIR" \
+  --arg key_hash "$KEY_HASH" \
+  --arg key_label "$KEY_LABEL" \
+  --argjson cost_usd "$cost_usd" \
+  --arg source "$source" \
+  '{session_id:$session_id, harness:$harness, model:$model,
+    started_at:$started_at, ended_at:$ended_at, duration_s:$duration_s,
+    exit_code:$exit_code, cwd:$cwd, openrouter_key_hash:$key_hash,
+    openrouter_key_label:$key_label, cost_usd:$cost_usd, source:$source}' \
+  >> "$SPEND_FILE"
+
+if [ "$cost_usd" != "null" ]; then
+  printf 'llm: session %s (%s) cost $%s\n' "$SESSION_ID" "$HARNESS" "$cost_usd" >&2
+fi
+
+exit "$exit_code"
