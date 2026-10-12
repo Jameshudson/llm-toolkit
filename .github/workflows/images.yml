@@ -43,7 +43,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: container/base/Dockerfile
+          file: images/base/Dockerfile
           platforms: ${{ env.PLATFORMS }}
           push: true
           tags: ${{ env.REGISTRY }}/${{ steps.owner.outputs.name }}/llm-toolkit:base
@@ -54,7 +54,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: container/node/Dockerfile
+          file: images/node/Dockerfile
           platforms: ${{ env.PLATFORMS }}
           push: true
           build-args: BASE_REF=${{ env.REGISTRY }}/${{ steps.owner.outputs.name }}/llm-toolkit:base
@@ -66,7 +66,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: container/opencode/Dockerfile
+          file: images/opencode/Dockerfile
           platforms: ${{ env.PLATFORMS }}
           push: true
           build-args: NODE_REF=${{ env.REGISTRY }}/${{ steps.owner.outputs.name }}/llm-toolkit:node
@@ -78,7 +78,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: container/pi/Dockerfile
+          file: images/pi/Dockerfile
           platforms: ${{ env.PLATFORMS }}
           push: true
           build-args: NODE_REF=${{ env.REGISTRY }}/${{ steps.owner.outputs.name }}/llm-toolkit:node

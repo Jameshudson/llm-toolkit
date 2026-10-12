@@ -3,7 +3,8 @@
 # session's spend.
 #
 # Usage:
-#   llm init                          # create this repo's .llm-toolkit/ state dir
+#   llm init                          # copy the toolkit's template/ into .llm-toolkit/
+#   llm config                        # re-seed .llm-toolkit/config/ from the defaults
 #   llm opencode [opencode args...]   # interactive opencode TUI
 #   llm pi [pi args...]               # interactive pi
 #   llm shell                         # bash inside the container
@@ -54,11 +55,14 @@ for f in "$TOOLKIT_DIR/.env" "$STATE_DIR/.env"; do
   fi
 done
 
-# Harness config: prefer a per-repo override, else the toolkit defaults.
+# The template `llm init` copies into a repo, and the fallback config.
+TEMPLATE="$TOOLKIT_DIR/template"
+
+# Harness config: the repo's own config/ if present, else the template's.
 CONFIG_OPENCODE="$STATE_DIR/config/opencode"
-[ -d "$CONFIG_OPENCODE" ] || CONFIG_OPENCODE="$TOOLKIT_DIR/config/opencode"
+[ -d "$CONFIG_OPENCODE" ] || CONFIG_OPENCODE="$TEMPLATE/config/opencode"
 CONFIG_PI="$STATE_DIR/config/pi/agent"
-[ -d "$CONFIG_PI" ] || CONFIG_PI="$TOOLKIT_DIR/config/pi/agent"
+[ -d "$CONFIG_PI" ] || CONFIG_PI="$TEMPLATE/config/pi/agent"
 
 # Image refs. LLM_REGISTRY is the prefix before "llm-toolkit", e.g.
 # "ghcr.io/you/" (trailing slash). Empty means local tags. LLM_IMAGE overrides
@@ -74,7 +78,7 @@ export LLM_STATE_DIR="$STATE_DIR"
 die() { echo "llm: $*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -95,22 +99,43 @@ if [ "$HARNESS" = "run" ]; then
   [ -n "$HARNESS" ] || die "run: --harness is required"
 fi
 
-# `llm init` bootstraps a repo's state dir.
+# `llm init` copies the toolkit template into a repo's .llm-toolkit/.
 if [ "$HARNESS" = "init" ]; then
   mkdir -p "$STATE_DIR/data"
-  if [ ! -f "$STATE_DIR/.env" ]; then
-    cp "$TOOLKIT_DIR/.env.example" "$STATE_DIR/.env"
-    echo "created $STATE_DIR/.env"
-  else
-    echo "kept existing $STATE_DIR/.env"
+  if [ -f "$TEMPLATE/.env.example" ]; then
+    if [ ! -f "$STATE_DIR/.env" ]; then
+      cp "$TEMPLATE/.env.example" "$STATE_DIR/.env"
+      echo "created .env"
+    else
+      echo "kept existing .env"
+    fi
   fi
+  for f in "$TEMPLATE"/*; do
+    [ -e "$f" ] || continue
+    base="$(basename "$f")"
+    dest="$STATE_DIR/$base"
+    if [ ! -e "$dest" ]; then
+      cp -R "$f" "$dest"
+      echo "added $base"
+    fi
+  done
   echo "state dir: $STATE_DIR"
-  echo "add to .gitignore:"
+  echo "add to .gitignore (commit the rest of .llm-toolkit/):"
   if [ "$STATE_DIR" = "$REPO_ROOT" ]; then
     echo "  .env"; echo "  /data/"; echo "  /spend/"
   else
-    echo "  ${STATE_DIR#"$REPO_ROOT"/}/"
+    echo "  ${STATE_DIR#"$REPO_ROOT"/}/.env"
+    echo "  ${STATE_DIR#"$REPO_ROOT"/}/data/"
+    echo "  ${STATE_DIR#"$REPO_ROOT"/}/spend/"
   fi
+  exit 0
+fi
+
+# `llm config` re-seeds this project's config from the template defaults.
+if [ "$HARNESS" = "config" ]; then
+  mkdir -p "$STATE_DIR/config"
+  cp -R "$TEMPLATE/config/." "$STATE_DIR/config/"
+  echo "copied default config to $STATE_DIR/config (edit to override)"
   exit 0
 fi
 
@@ -161,18 +186,18 @@ fetch() {
 }
 
 ensure_base() {
-  fetch "$(img base)" "$TOOLKIT_DIR/container/base/Dockerfile"
+  fetch "$(img base)" "$TOOLKIT_DIR/images/base/Dockerfile"
 }
 
 ensure_node() {
-  fetch "$(img node)" "$TOOLKIT_DIR/container/node/Dockerfile" \
+  fetch "$(img node)" "$TOOLKIT_DIR/images/node/Dockerfile" \
     --build-arg "BASE_REF=$(img base)"
 }
 
 ensure_harness() {
   local h="$1"
   [ "$h" = "base" ] && { ensure_base; return 0; }
-  fetch "$(img "$h")" "$TOOLKIT_DIR/container/${h}/Dockerfile" \
+  fetch "$(img "$h")" "$TOOLKIT_DIR/images/${h}/Dockerfile" \
     --build-arg "NODE_REF=$(img node)"
 }
 

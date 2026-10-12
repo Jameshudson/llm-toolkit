@@ -27,24 +27,35 @@ configuration and state.
 bin/llm         CLI: mint a session key, run the container, record spend
 bin/or-key      OpenRouter Management API helper (create/list/get/delete keys)
 bin/spend       report on sessions.jsonl (summary / list / csv)
-container/      base/, node/, opencode/, pi/ image definitions + shared entrypoint
-config/         default opencode/pi config, mounted read-only
+images/         base/, node/, opencode/, pi/ image definitions + shared entrypoint
+template/       the .llm-toolkit/ template `llm init` copies into a repo
 include.mk      optional make sugar for project repos
 ```
 
 ## Install (this repo)
 
 ```sh
-make build        # build base + node + opencode + pi (local tags)
-make install      # put llm, or-key, spend on PATH (~/.local/bin)
+./install.sh       # or: make install
+make build         # optional: build the images locally now
 ```
 
-`make install` copies the toolkit to `~/.local/share/llm-toolkit` and installs
-wrapper scripts into `~/.local/bin` (override with `PREFIX=/some/prefix`). Make
-sure that directory is on `PATH`.
+`./install.sh` copies the toolkit to `~/.local/share/llm-toolkit` and puts
+`llm`, `or-key`, and `spend` on PATH via wrappers in `~/.local/bin` (override
+with `PREFIX=/some/prefix`). Images build on first use, or pull when
+`LLM_REGISTRY` is set.
 
 Requires a running container runtime. OrbStack is recommended
 (`brew install --cask orbstack`).
+
+### Uninstall
+
+```sh
+./uninstall.sh              # or: make uninstall
+./uninstall.sh --images     # also remove the llm-toolkit Docker images
+```
+
+Removes the CLI wrappers and the `~/.local/share/llm-toolkit` copy. Project
+`.llm-toolkit/` directories are left untouched.
 
 ### Publish (optional)
 
@@ -97,15 +108,24 @@ layers with `make build-base`, `make build-node`, `make build-opencode`,
 From anywhere inside a git repo:
 
 ```sh
-llm init          # creates .llm-toolkit/, seeds .env, prints gitignore lines
+llm init          # scaffold .llm-toolkit/ (settings + state)
 $EDITOR .llm-toolkit/.env
 llm opencode      # or: llm pi
 ```
 
+`llm init` copies the toolkit's `template/` into the repo as `.llm-toolkit/`:
+the project-owned `config/`, a `README.md`, and `.env.example` → `.env`.
+
+`.llm-toolkit/` is project settings, so commit it — except secrets and state:
+
+```gitignore
+.llm-toolkit/.env
+.llm-toolkit/data/
+.llm-toolkit/spend/
+```
+
 That's the whole integration — no submodule, no vendored files. `llm` finds the
 enclosing repo, keeps state in `.llm-toolkit/`, and runs against the repo root.
-
-Add `.llm-toolkit/` to `.gitignore`.
 
 Optional make sugar — add one line to the repo's Makefile:
 
@@ -116,18 +136,20 @@ Optional make sugar — add one line to the repo's Makefile:
 then `make llm-opencode`, `make llm-pi`, `make llm-shell`, `make llm-run
 HARNESS=pi ARGS="..."`, `make llm-spend`.
 
-### Where state lives
+### What `llm init` creates
 
 ```
 .llm-toolkit/
-├── .env            keys and per-repo defaults (gitignored)
-├── mounts          extra docker mounts (optional)
-├── Dockerfile      derived image for extra tools (optional)
-├── on-start.sh     hook run before the harness (optional)
-├── config/         opencode/pi config overrides (optional)
-├── data/           sessions, auth, caches (gitignored)
-└── spend/          sessions.jsonl (gitignored)
+├── .env                 keys and defaults (gitignored)
+├── README.md            what each file is
+├── config/              opencode/pi config for this project (commit it)
+├── data/                harness sessions, auth, caches (gitignored)
+└── spend/sessions.jsonl (gitignored)
 ```
+
+Everything except `.env`, `data/`, and `spend/` is meant to be committed.
+Optional `mounts`, `Dockerfile`, and `on-start.sh` files (documented in
+`.llm-toolkit/README.md`) are created on demand.
 
 ## Per-repo customization
 
@@ -171,10 +193,11 @@ matching run uses it automatically. Deriving from `base` gives you no Node — u
 For lighter, on-demand setup, add `.llm-toolkit/on-start.sh` — it runs inside the
 container (as root, in `/workspace`) before the harness starts.
 
-### Config overrides
+### Config
 
-Copy the toolkit's `config/` into `.llm-toolkit/config/` and edit; the per-repo
-copy wins over the toolkit defaults.
+`.llm-toolkit/config/` holds this project's opencode/pi config, seeded by
+`llm init` from the template. Edit and commit it. When it is absent, `llm` falls
+back to the template defaults; `llm config` re-seeds it.
 
 ## Usage
 
@@ -239,5 +262,6 @@ place so usage stays queryable. Clean up old ones with `or-key list` and
   config that way); a repo can add image hooks too, or use `on-start.sh`.
 - The host's `~/.ssh` and git config are mounted for git operations; the SSH
   agent socket is forwarded when available.
-- Toolkit `config/` is mounted read-only; per-repo overrides go in
-  `.llm-toolkit/config/`.
+- A project's `config/` lives in `.llm-toolkit/config/` (committed). The toolkit's
+  `template/` is the source it is copied from, and the fallback when a repo
+  has none.

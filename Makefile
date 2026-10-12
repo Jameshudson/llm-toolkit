@@ -45,9 +45,8 @@ OPENCODE_IMAGE := $(LLM_REGISTRY)llm-toolkit:opencode
 PI_IMAGE       := $(LLM_REGISTRY)llm-toolkit:pi
 REPO_SLUG      := $(shell basename $(REPO_ROOT) | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
 
-# Install location for `make install`.
+# Install location for `make install` (see install.sh).
 PREFIX ?= $(HOME)/.local
-DEST   := $(PREFIX)/share/llm-toolkit
 
 WORKDIR ?= $(REPO_ROOT)
 TERM    ?= xterm-256color
@@ -76,18 +75,18 @@ build: build-base build-node build-opencode build-pi
 	fi
 
 build-base:
-	docker build -f $(TOOLKIT_DIR)/container/base/Dockerfile -t $(BASE_IMAGE) $(TOOLKIT_DIR)
+	docker build -f $(TOOLKIT_DIR)/images/base/Dockerfile -t $(BASE_IMAGE) $(TOOLKIT_DIR)
 
 build-node: build-base
-	docker build -f $(TOOLKIT_DIR)/container/node/Dockerfile \
+	docker build -f $(TOOLKIT_DIR)/images/node/Dockerfile \
 		--build-arg "BASE_REF=$(BASE_IMAGE)" -t $(NODE_IMAGE) $(TOOLKIT_DIR)
 
 build-opencode: build-node
-	docker build -f $(TOOLKIT_DIR)/container/opencode/Dockerfile \
+	docker build -f $(TOOLKIT_DIR)/images/opencode/Dockerfile \
 		--build-arg "NODE_REF=$(NODE_IMAGE)" -t $(OPENCODE_IMAGE) $(TOOLKIT_DIR)
 
 build-pi: build-node
-	docker build -f $(TOOLKIT_DIR)/container/pi/Dockerfile \
+	docker build -f $(TOOLKIT_DIR)/images/pi/Dockerfile \
 		--build-arg "NODE_REF=$(NODE_IMAGE)" -t $(PI_IMAGE) $(TOOLKIT_DIR)
 
 check-registry:
@@ -100,30 +99,19 @@ publish: check-registry build
 	docker push $(PI_IMAGE)
 
 install:
-	@mkdir -p "$(DEST)" "$(PREFIX)/bin"
-	@cp -R "$(TOOLKIT_DIR)/bin" "$(TOOLKIT_DIR)/container" "$(TOOLKIT_DIR)/config" \
-		"$(TOOLKIT_DIR)/include.mk" "$(TOOLKIT_DIR)/.env.example" "$(DEST)/"
-	@for c in llm or-key spend; do \
-		printf '#!/usr/bin/env bash\nexec "%s/bin/%s" "$$@"\n' "$(DEST)" "$$c" > "$(PREFIX)/bin/$$c"; \
-		chmod +x "$(PREFIX)/bin/$$c"; \
-	done
-	@echo "installed llm, or-key, spend into $(PREFIX)/bin"
-	@echo "toolkit data at $(DEST)"
-	@case ":$$PATH:" in *":$(PREFIX)/bin:"*) ;; *) echo "note: add $(PREFIX)/bin to PATH";; esac
+	@PREFIX="$(PREFIX)" "$(TOOLKIT_DIR)/install.sh"
 
 uninstall:
-	@rm -f "$(PREFIX)/bin/llm" "$(PREFIX)/bin/or-key" "$(PREFIX)/bin/spend"
-	@rm -rf "$(DEST)"
-	@echo "removed $(PREFIX)/bin/{llm,or-key,spend} and $(DEST)"
+	@PREFIX="$(PREFIX)" "$(TOOLKIT_DIR)/uninstall.sh" $(if $(IMAGES),--images,)
 
 init:
 	@mkdir -p "$(STATE_DIR)/data"
-	@if [ ! -f "$(STATE_DIR)/.env" ]; then cp "$(TOOLKIT_DIR)/.env.example" "$(STATE_DIR)/.env"; echo "created $(STATE_DIR)/.env"; else echo "kept existing $(STATE_DIR)/.env"; fi
+	@if [ ! -f "$(STATE_DIR)/.env" ]; then cp "$(TOOLKIT_DIR)/template/.env.example" "$(STATE_DIR)/.env"; echo "created $(STATE_DIR)/.env"; else echo "kept existing $(STATE_DIR)/.env"; fi
 	@if [ "$(STATE_DIR)" = "$(TOOLKIT_DIR)" ]; then echo "add to .gitignore: .env, /data/, /spend/"; else echo "add to .gitignore: $(patsubst $(REPO_ROOT)/%,%,$(STATE_DIR))/"; fi
 
 config:
 	@mkdir -p "$(STATE_DIR)/config"
-	@cp -R "$(TOOLKIT_DIR)/config/." "$(STATE_DIR)/config/"
+	@cp -R "$(TOOLKIT_DIR)/template/config/." "$(STATE_DIR)/config/"
 	@echo "copied toolkit config to $(STATE_DIR)/config (edit to override per repo)"
 
 opencode:

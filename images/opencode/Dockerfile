@@ -3,7 +3,7 @@
 # llm-toolkit — opencode harness image (node + opencode).
 #
 # Build (local tag) or publish (registry tag):
-#   docker build -f container/opencode/Dockerfile --build-arg NODE_REF=llm-toolkit:node -t llm-toolkit:opencode .
+#   docker build -f images/opencode/Dockerfile --build-arg NODE_REF=llm-toolkit:node -t llm-toolkit:opencode .
 
 ARG NODE_REF=llm-toolkit:node
 FROM ${NODE_REF}

@@ -7,7 +7,7 @@
 # README.
 #
 # Build:
-#   docker build -f container/base/Dockerfile -t llm-toolkit:base .
+#   docker build -f images/base/Dockerfile -t llm-toolkit:base .
 
 FROM debian:bookworm-slim
 
@@ -32,7 +32,7 @@ RUN apt-get update \
 
 # Generic entrypoint: prepares the workspace and SSH agent, runs entrypoint
 # hooks, then execs the command. Harness-specific setup lives in harness images.
-COPY container/base/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY images/base/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 WORKDIR /workspace

@@ -4,8 +4,8 @@
 # stored once, not once per harness.
 #
 # Build (local tag) or publish (registry tag):
-#   docker build -f container/node/Dockerfile --build-arg BASE_REF=llm-toolkit:base -t llm-toolkit:node .
-#   docker build -f container/node/Dockerfile --build-arg BASE_REF=ghcr.io/you/llm-toolkit:base -t ghcr.io/you/llm-toolkit:node .
+#   docker build -f images/node/Dockerfile --build-arg BASE_REF=llm-toolkit:base -t llm-toolkit:node .
+#   docker build -f images/node/Dockerfile --build-arg BASE_REF=ghcr.io/you/llm-toolkit:base -t ghcr.io/you/llm-toolkit:node .
 
 ARG NODE_IMAGE=node:24-bookworm-slim
 ARG BASE_REF=llm-toolkit:base
