@@ -20,10 +20,10 @@
 # Images are pulled from LLM_REGISTRY when set, and built from this toolkit's
 # Dockerfiles otherwise (or as a fallback).
 #
-# Per-session spend: when OPENROUTER_MANAGEMENT_KEY is set (and LLM_SESSION_KEYS
-# is not 0), a fresh OpenRouter API key is minted for this session, injected as
-# OPENROUTER_API_KEY, and its usage is read back at exit. One JSONL record is
-# appended to spend/sessions.jsonl. See the README for the DeepSeek caveat.
+# Spend: when OPENROUTER_MANAGEMENT_KEY is set (and LLM_SESSION_KEYS is not 0),
+# one OpenRouter API key per project+harness is reused (cached in data/keys.json)
+# and injected as OPENROUTER_API_KEY; its usage delta across the run is recorded
+# to spend/sessions.jsonl. See the README for the DeepSeek caveat.
 set -euo pipefail
 
 # LLM_TOOLKIT_DIR lets an installed CLI point back at its data dir.
@@ -313,20 +313,53 @@ fi
 
 # --- session identity ---------------------------------------------------------
 SESSION_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM}"
+
+# --- OpenRouter key: one per project+harness, reused across sessions ----------
+# The key secret is cached locally (data/keys.json, gitignored); per-session
+# spend is the difference in its usage across the run.
 KEY_HASH=""
 KEY_LABEL=""
+SESSION_KEY=""
+USAGE_BEFORE="0"
 
-# --- per-session OpenRouter key (interactive/one-shot harnesses only) ---------
 if [ "$HARNESS" != "shell" ] && [ "$LLM_SESSION_KEYS" != "0" ] && [ -n "${OPENROUTER_MANAGEMENT_KEY:-}" ]; then
-  KEY_LABEL="llm-toolkit/${HOST_SHORT}/${SLUG}/${HARNESS}/${SESSION_ID}"
-  create_args=(--name "$KEY_LABEL")
-  [ -n "${SESSION_LIMIT:-}" ] && create_args+=(--limit "$SESSION_LIMIT")
-  if resp="$("$TOOLKIT_DIR/bin/or-key" create "${create_args[@]}" 2>/dev/null)"; then
-    OPENROUTER_API_KEY="$(jq -r '.key // .data.key' <<<"$resp")"
-    KEY_HASH="$(jq -r '.data.hash // .hash // empty' <<<"$resp")"
-    export OPENROUTER_API_KEY
-  else
-    echo "llm: warning: could not mint per-session key; falling back to OPENROUTER_API_KEY" >&2
+  KEY_LABEL="llm-toolkit/${HOST_SHORT}/${SLUG}/${HARNESS}"
+  KEY_CACHE="$GLOBAL_DIR/keys.json"
+  mkdir -p "$GLOBAL_DIR"; chmod 700 "$GLOBAL_DIR" 2>/dev/null || true
+
+  if [ -f "$KEY_CACHE" ]; then
+    SESSION_KEY="$(jq -r --arg n "$KEY_LABEL" '.[$n].key // empty' "$KEY_CACHE" 2>/dev/null || true)"
+    KEY_HASH="$(jq -r --arg n "$KEY_LABEL" '.[$n].hash // empty' "$KEY_CACHE" 2>/dev/null || true)"
+  fi
+
+  if [ -z "$SESSION_KEY" ]; then
+    # Cache miss: drop any key already using this name so we keep exactly one.
+    stale="$("$TOOLKIT_DIR/bin/or-key" list 2>/dev/null | jq -r --arg n "$KEY_LABEL" '(if type=="object" then .data else . end)[]? | select(.name==$n) | .hash' 2>/dev/null || true)"
+    while IFS= read -r h; do [ -n "$h" ] && "$TOOLKIT_DIR/bin/or-key" delete "$h" >/dev/null 2>&1 || true; done <<<"$stale"
+
+    create_args=(--name "$KEY_LABEL")
+    [ -n "${SESSION_LIMIT:-}" ] && create_args+=(--limit "$SESSION_LIMIT")
+    if resp="$("$TOOLKIT_DIR/bin/or-key" create "${create_args[@]}" 2>/dev/null)"; then
+      SESSION_KEY="$(jq -r '.key // .data.key' <<<"$resp")"
+      KEY_HASH="$(jq -r '.data.hash // .hash // empty' <<<"$resp")"
+      tmp="$KEY_CACHE.tmp.$$"
+      if [ -f "$KEY_CACHE" ]; then
+        jq --arg n "$KEY_LABEL" --arg k "$SESSION_KEY" --arg h "$KEY_HASH" '.[$n]={key:$k,hash:$h}' "$KEY_CACHE" > "$tmp"
+      else
+        jq -n --arg n "$KEY_LABEL" --arg k "$SESSION_KEY" --arg h "$KEY_HASH" '{($n):{key:$k,hash:$h}}' > "$tmp"
+      fi
+      mv "$tmp" "$KEY_CACHE"; chmod 600 "$KEY_CACHE" 2>/dev/null || true
+    else
+      echo "llm: warning: could not create OpenRouter key; falling back to OPENROUTER_API_KEY" >&2
+    fi
+  fi
+
+  if [ -n "$SESSION_KEY" ]; then
+    OPENROUTER_API_KEY="$SESSION_KEY"; export OPENROUTER_API_KEY
+    if [ -n "$KEY_HASH" ]; then
+      USAGE_BEFORE="$("$TOOLKIT_DIR/bin/or-key" get "$KEY_HASH" 2>/dev/null | jq -r '.usage // 0' 2>/dev/null || true)"
+      case "$USAGE_BEFORE" in ''|*[!0-9.]*) USAGE_BEFORE="0" ;; esac
+    fi
   fi
 fi
 
@@ -394,11 +427,13 @@ ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 duration_s=$(( ended_epoch - started_epoch ))
 
 # --- spend capture ------------------------------------------------------------
+# Per-session spend is the key's usage delta across the run.
 cost_usd="null"
 source="none"
 if [ -n "$KEY_HASH" ]; then
   if usage_json="$("$TOOLKIT_DIR/bin/or-key" get "$KEY_HASH" 2>/dev/null)"; then
-    cost_usd="$(jq -r '.usage // 0' <<<"$usage_json")"
+    usage_after="$(jq -r '.usage // 0' <<<"$usage_json")"
+    cost_usd="$(jq -n --argjson a "$usage_after" --argjson b "$USAGE_BEFORE" '($a - $b) | if . < 0 then 0 else . end')"
     source="openrouter-key"
   fi
 fi

@@ -3,6 +3,7 @@
 Run coding harnesses (`opencode`, `pi`) inside a container — nothing installed
 on the host — with per-session spend tracking.
 
+
 `llm-toolkit` builds and (optionally) publishes a small set of Docker images and
 ships a `llm` CLI. Project repos don't vendor any of it: they pull the images and
 use the CLI, keeping only a gitignored `.llm-toolkit/` directory for per-repo
@@ -15,8 +16,9 @@ configuration and state.
   `llm-toolkit:opencode` / `llm-toolkit:pi` add one harness each.
 - **Provider keys via env.** OpenRouter and DeepSeek keys are injected as
   environment variables and never written into the repo.
-- **Per-session spend.** With an OpenRouter *management* key, each session mints
-  its own scoped API key; its `usage` is read back at exit and appended to
+- **Spend tracking.** With an OpenRouter *management* key, `llm` keeps one
+  scoped API key per project+harness (cached in `~/.llm-toolkit/keys.json`)
+  and records each session's spend as the key's usage delta in
   `.llm-toolkit/spend/sessions.jsonl`.
 - **Per-repo customization.** Each repo can add mounts, extra tools, config
   overrides, and an on-start hook via `.llm-toolkit/`.
@@ -103,11 +105,11 @@ layers with `make build-base`, `make build-node`, `make build-opencode`,
 
 | Variable | Purpose |
 |---|---|
-| `OPENROUTER_MANAGEMENT_KEY` | Admin key from <https://openrouter.ai/settings/management-keys>. Enables per-session key minting. Cannot make inference calls. |
+| `OPENROUTER_MANAGEMENT_KEY` | Admin key from <https://openrouter.ai/settings/management-keys>. Enables spend tracking (one scoped key per project+harness). Cannot make inference calls. |
 | `OPENROUTER_API_KEY` | Fallback inference key when no management key is set. |
 | `DEEPSEEK_API_KEY` | Injected as-is. DeepSeek has no key-management API, so keys are created in their web UI. |
-| `SESSION_LIMIT` | Optional USD credit limit applied to each per-session OpenRouter key. |
-| `LLM_SESSION_KEYS` | `0` disables per-session key minting. |
+| `SESSION_LIMIT` | Optional USD credit limit applied to the managed OpenRouter key. |
+| `LLM_SESSION_KEYS` | `0` disables the managed key and uses `OPENROUTER_API_KEY` directly. |
 
 Keys are resolved in this order (first wins): the environment, the repo's
 `.llm-toolkit/.env`, then a global `~/.llm-toolkit/settings.json`. Put shared
@@ -235,7 +237,7 @@ Each session writes one JSONL record to `.llm-toolkit/spend/sessions.jsonl`:
 {"session_id":"20261012T134501Z-1234-5678","harness":"opencode",
  "model":"openrouter/deepseek/deepseek-v4-flash","started_at":"...",
  "ended_at":"...","duration_s":412,"exit_code":0,"cwd":"/path",
- "openrouter_key_hash":"...","openrouter_key_label":"llm-toolkit/opencode/...",
+ "openrouter_key_hash":"...","openrouter_key_label":"llm-toolkit/<host>/<project>/opencode",
  "cost_usd":0.0341,"source":"openrouter-key"}
 ```
 
@@ -245,8 +247,9 @@ spend list -n 50
 spend csv             # -> .llm-toolkit/spend/sessions.csv
 ```
 
-Spend comes from the per-session OpenRouter key's `usage`, which is
-harness-agnostic. It requires routing inference through OpenRouter (the default
+Spend comes from the managed OpenRouter key's `usage`: `llm` reads it before and
+after the run and records the delta, harness-agnostic (works through opencode,
+pi, or a subagent). It requires routing inference through OpenRouter (the default
 `openrouter/deepseek/*` models do).
 
 **Caveats**
@@ -255,6 +258,10 @@ harness-agnostic. It requires routing inference through OpenRouter (the default
   per-key usage API. `source` is `none` and `cost_usd` is `null`.
 - Without `OPENROUTER_MANAGEMENT_KEY`, sessions fall back to `OPENROUTER_API_KEY`
   and are recorded unpriced.
+- The key is reused per project+harness, so **concurrent** sessions in the same
+  project share it and their deltas can overlap. The cached secret lives in
+  `~/.llm-toolkit/keys.json` (`0600`, outside any repo); if it's lost, the key is
+  recreated.
 - Key `usage` is read at session exit; a request still in flight may not be
   reflected.
 - `llm shell` sessions are not recorded.
