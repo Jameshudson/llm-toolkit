@@ -1,24 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "openrouter": {
-      "models": {
-        "deepseek/deepseek-v4-flash": {
-          "limit": { "context": 90000, "output": 4096 }
-        },
-        "deepseek/deepseek-v4-pro": {
-          "limit": { "context": 90000, "output": 4096 }
-        }
-      }
-    },
-    "deepseek": {
-      "models": {
-        "deepseek-chat": {
-          "limit": { "context": 64000, "output": 8192 }
-        }
-      }
-    }
-  },
-  "model": "openrouter/deepseek/deepseek-v4-flash",
+  "model": "openrouter/deepseek/deepseek-v4.1-flash",
   "instructions": ["AGENTS.md"]
 }

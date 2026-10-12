@@ -357,8 +357,15 @@ if [ "$HARNESS" != "shell" ] && [ "$LLM_SESSION_KEYS" != "0" ] && [ -n "${OPENRO
   if [ -n "$SESSION_KEY" ]; then
     OPENROUTER_API_KEY="$SESSION_KEY"; export OPENROUTER_API_KEY
     if [ -n "$KEY_HASH" ]; then
-      USAGE_BEFORE="$("$TOOLKIT_DIR/bin/or-key" get "$KEY_HASH" 2>/dev/null | jq -r '.usage // 0' 2>/dev/null || true)"
+      key_json="$("$TOOLKIT_DIR/bin/or-key" get "$KEY_HASH" 2>/dev/null || true)"
+      USAGE_BEFORE="$(jq -r '.usage // 0' <<<"$key_json" 2>/dev/null || true)"
       case "$USAGE_BEFORE" in ''|*[!0-9.]*) USAGE_BEFORE="0" ;; esac
+      # Keep the key's credit limit in sync with SESSION_LIMIT.
+      if [ -n "${SESSION_LIMIT:-}" ]; then
+        cur_limit="$(jq -r '.limit // empty' <<<"$key_json" 2>/dev/null || true)"
+        [ "$cur_limit" = "$SESSION_LIMIT" ] \
+          || "$TOOLKIT_DIR/bin/or-key" update "$KEY_HASH" --limit "$SESSION_LIMIT" >/dev/null 2>&1 || true
+      fi
     fi
   fi
 fi

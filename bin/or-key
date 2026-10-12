@@ -8,10 +8,12 @@
 #   or-key create --name NAME [--limit USD] [--reset daily|weekly|monthly] [--raw]
 #   or-key list [--offset N]
 #   or-key get HASH
+#   or-key update HASH [--limit USD] [--reset daily|weekly|monthly]
 #   or-key delete HASH
 #
 # `create` prints the full JSON response unless --raw is given, in which case it
-# prints only the secret key. bin/llm uses `create` to mint one key per session.
+# prints only the secret key. bin/llm creates one key per project+harness and
+# reuses it.
 set -euo pipefail
 
 BASE="https://openrouter.ai/api/v1"
@@ -26,7 +28,7 @@ if [ -z "${OPENROUTER_MANAGEMENT_KEY:-}" ]; then
 fi
 
 usage() {
-  sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -91,6 +93,21 @@ case "$cmd" in
   delete)
     hash="${1:?or-key delete HASH}"
     api DELETE "/keys/${hash}" | jq '.' 2>/dev/null || echo '{"deleted":true}'
+    ;;
+
+  update)
+    hash="${1:?or-key update HASH}"
+    shift
+    body="{}"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --limit) body="$(jq -c --argjson l "${2:?--limit needs a value}" '. + {limit:$l}' <<<"$body")"; shift 2 ;;
+        --reset) body="$(jq -c --arg r "${2:?--reset needs a value}" '. + {limit_reset:$r}' <<<"$body")"; shift 2 ;;
+        -h|--help) usage 0 ;;
+        *) echo "or-key update: unknown flag: $1" >&2; usage 1 ;;
+      esac
+    done
+    api PATCH "/keys/${hash}" "$body" | jq '.data // .'
     ;;
 
   ''|-h|--help|help)

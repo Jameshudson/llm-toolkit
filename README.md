@@ -108,7 +108,7 @@ layers with `make build-base`, `make build-node`, `make build-opencode`,
 | `OPENROUTER_MANAGEMENT_KEY` | Admin key from <https://openrouter.ai/settings/management-keys>. Enables spend tracking (one scoped key per project+harness). Cannot make inference calls. |
 | `OPENROUTER_API_KEY` | Fallback inference key when no management key is set. |
 | `DEEPSEEK_API_KEY` | Injected as-is. DeepSeek has no key-management API, so keys are created in their web UI. |
-| `SESSION_LIMIT` | Optional USD credit limit applied to the managed OpenRouter key. |
+| `SESSION_LIMIT` | USD credit limit applied to the managed key (default `$5`). Empty = no limit; changing it re-syncs the existing key's limit. |
 | `LLM_SESSION_KEYS` | `0` disables the managed key and uses `OPENROUTER_API_KEY` directly. |
 
 Keys are resolved in this order (first wins): the environment, the repo's
@@ -226,7 +226,7 @@ llm pi                          # pi
 llm shell                       # bash inside the container
 llm run --harness pi "summarise this repo"
 llm opencode WORKDIR=~/x        # run against another directory
-MODEL=openrouter/deepseek/deepseek-v4-flash llm pi
+MODEL=openrouter/deepseek/deepseek-v4.1-flash llm pi
 ```
 
 ## Spend tracking
@@ -235,7 +235,7 @@ Each session writes one JSONL record to `.llm-toolkit/spend/sessions.jsonl`:
 
 ```json
 {"session_id":"20261012T134501Z-1234-5678","harness":"opencode",
- "model":"openrouter/deepseek/deepseek-v4-flash","started_at":"...",
+ "model":"openrouter/deepseek/deepseek-v4.1-flash","started_at":"...",
  "ended_at":"...","duration_s":412,"exit_code":0,"cwd":"/path",
  "openrouter_key_hash":"...","openrouter_key_label":"llm-toolkit/<host>/<project>/opencode",
  "cost_usd":0.0341,"source":"openrouter-key"}
