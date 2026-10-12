@@ -16,4 +16,8 @@ RUN npm install -g opencode-ai@${OPENCODE_VERSION} \
  && npm cache clean --force \
  && opencode --version
 
+# OpenCode-specific entrypoint hook (config seeding); base stays harness-agnostic.
+COPY images/opencode/entrypoint.d/ /etc/llm-toolkit/entrypoint.d/
+RUN chmod +x /etc/llm-toolkit/entrypoint.d/*.sh
+
 CMD ["opencode"]

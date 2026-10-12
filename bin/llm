@@ -256,6 +256,8 @@ fi
 #   ARG HARNESS=base
 #   FROM ${LLM_REGISTRY}llm-toolkit:${HARNESS}
 SLUG="$(basename "$REPO_ROOT" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')"
+HOST_SHORT="$(hostname -s 2>/dev/null | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')"
+[ -n "$HOST_SHORT" ] || HOST_SHORT="host"
 HARNESS_FOR_IMAGE="$HARNESS"
 [ "$HARNESS" = "shell" ] && HARNESS_FOR_IMAGE="base"
 
@@ -316,7 +318,7 @@ KEY_LABEL=""
 
 # --- per-session OpenRouter key (interactive/one-shot harnesses only) ---------
 if [ "$HARNESS" != "shell" ] && [ "$LLM_SESSION_KEYS" != "0" ] && [ -n "${OPENROUTER_MANAGEMENT_KEY:-}" ]; then
-  KEY_LABEL="llm-toolkit/${HARNESS}/${SESSION_ID}"
+  KEY_LABEL="llm-toolkit/${HOST_SHORT}/${SLUG}/${HARNESS}/${SESSION_ID}"
   create_args=(--name "$KEY_LABEL")
   [ -n "${SESSION_LIMIT:-}" ] && create_args+=(--limit "$SESSION_LIMIT")
   if resp="$("$TOOLKIT_DIR/bin/or-key" create "${create_args[@]}" 2>/dev/null)"; then
@@ -331,7 +333,7 @@ fi
 # --- docker mounts ------------------------------------------------------------
 mounts=(
   -v "$WORKDIR:/workspace"
-  -v "$CONFIG_OPENCODE:/root/.config/opencode:ro"
+  -v "$CONFIG_OPENCODE:/opt/opencode-config:ro"
   -v "$STATE_DIR/data/opencode:/root/.local/share/opencode"
   -v "$CONFIG_PI:/opt/pi-config:ro"
   -v "$STATE_DIR/data/pi/agent:/root/.pi/agent"

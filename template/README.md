@@ -13,9 +13,13 @@ Commit this directory, except the secrets and runtime state:
 | Path | Purpose |
 |---|---|
 | `config/` | opencode/pi config for this project. Edit and commit; `llm config` re-seeds it from the defaults (overwriting). |
-| `.env` | Keys and defaults — gitignored. |
+| `.env` | Per-repo overrides — gitignored. Keys are usually global (see below). |
 | `data/` | Harness runtime state (sessions, auth, caches) — gitignored. |
 | `spend/sessions.jsonl` | One JSON record per session — gitignored, created on first run. |
+
+Keys are user-level: if one is missing, `llm` prompts for it once and saves it to
+`~/.llm-toolkit/settings.json`, reused across repos. Set a key in `.env` only to
+override it for this repo.
 
 ## Optional files
 
