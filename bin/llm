@@ -14,6 +14,7 @@
 #   config/           opencode/pi config overriding the toolkit defaults
 #   image/Dockerfile  derived image FROM ${LLM_REGISTRY}llm-toolkit:${HARNESS}
 #   image/mounts      extra docker mounts, one "host:container[:ro]" per line
+#   image/env         extra env vars to forward to the container, one NAME per line
 #   image/on-start.sh runs inside the container before the harness starts
 #
 # Images are pulled from LLM_REGISTRY when set, and built from this toolkit's
@@ -306,10 +307,11 @@ if [ -n "${LLM_IMAGE:-}" ]; then
   IMAGE="$LLM_IMAGE"
 elif [ -f "$STATE_DIR/image/Dockerfile" ] || [ -f "$STATE_DIR/Dockerfile" ]; then
   if [ -f "$STATE_DIR/image/Dockerfile" ]; then
-    DOCKERFILE="$STATE_DIR/image/Dockerfile"; BUILD_CONTEXT="$STATE_DIR/image"
+    DOCKERFILE="$STATE_DIR/image/Dockerfile"
   else
-    DOCKERFILE="$STATE_DIR/Dockerfile"; BUILD_CONTEXT="$STATE_DIR"
+    DOCKERFILE="$STATE_DIR/Dockerfile"
   fi
+  BUILD_CONTEXT="$REPO_ROOT"
   IMAGE="llm-toolkit:repo-${SLUG}-${HARNESS_FOR_IMAGE}"
   ensure_harness "$HARNESS_FOR_IMAGE"
   if ! have "$IMAGE"; then
@@ -414,6 +416,19 @@ if [ -n "$AGENT_SOCK" ] && [ -S "$AGENT_SOCK" ]; then
 fi
 [ -n "${OPENROUTER_API_KEY:-}" ] && env_args+=(-e "OPENROUTER_API_KEY=$OPENROUTER_API_KEY")
 [ -n "${DEEPSEEK_API_KEY:-}" ] && env_args+=(-e "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY")
+
+# Forward extra env vars named in image/env (one NAME per line), if set. Use for
+# per-repo credentials the container needs (e.g. GH_TOKEN).
+ENV_FILE="$STATE_DIR/image/env"
+[ -f "$ENV_FILE" ] || ENV_FILE="$STATE_DIR/env"
+if [ -f "$ENV_FILE" ]; then
+  while IFS= read -r name || [ -n "$name" ]; do
+    name="${name%%$'\r'}"
+    case "$name" in ''|\#*) continue ;; esac
+    case "$name" in *[!A-Za-z0-9_]*) continue ;; esac
+    printenv "$name" >/dev/null 2>&1 && env_args+=(-e "$name=$(printenv "$name")")
+  done < "$ENV_FILE"
+fi
 
 # --- run ----------------------------------------------------------------------
 tty_args=(-i)
