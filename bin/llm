@@ -30,12 +30,17 @@ set -euo pipefail
 TOOLKIT_DIR="${LLM_TOOLKIT_DIR:-}"
 [ -n "$TOOLKIT_DIR" ] || TOOLKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Resolve the enclosing repo. If the toolkit lives inside a git repo (e.g. a
-# clone) that is the repo; otherwise fall back to the toolkit dir itself.
+# Resolve the project root: the git repo enclosing the current directory, else
+# the toolkit's superproject (a submodule checkout), else the current directory
+# itself — using the toolkit dir only when we are actually inside it.
 REPO_ROOT="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
 [ -n "$REPO_ROOT" ] || REPO_ROOT="$(git -C "$TOOLKIT_DIR" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
-[ -n "$REPO_ROOT" ] || REPO_ROOT="$(git -C "$TOOLKIT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
-[ -n "$REPO_ROOT" ] || REPO_ROOT="$TOOLKIT_DIR"
+if [ -z "$REPO_ROOT" ]; then
+  case "$PWD" in
+    "$TOOLKIT_DIR"|"$TOOLKIT_DIR"/*) REPO_ROOT="$TOOLKIT_DIR" ;;
+    *) REPO_ROOT="$PWD" ;;
+  esac
+fi
 
 # State (.env, data/) lives in the repo. Only when the toolkit IS the repo
 # (standalone use) does it fall back to the toolkit dir.
