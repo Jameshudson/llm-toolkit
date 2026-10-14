@@ -161,8 +161,22 @@ if [ "$HARNESS" = "run" ]; then
   [ -n "$HARNESS" ] || die "run: --harness is required"
 fi
 
-# `llm init` scaffolds a repo: the .llm-toolkit/ template, and the llm-toolkit
-# block in the repo's root .env (created, or appended if the block is missing).
+# Append a pattern to the repo's .gitignore unless it's already covered (either
+# as an exact line or by an existing pattern). Keeps runtime state out of git so
+# harness snapshots don't recurse into it.
+ensure_ignored() {
+  local entry="$1" gi="$REPO_ROOT/.gitignore" probe
+  probe="${entry#/}"; probe="${probe%/}"
+  [ -f "$gi" ] || : > "$gi"
+  grep -qxF "$entry" "$gi" 2>/dev/null && return 0
+  [ -n "$probe" ] && git -C "$REPO_ROOT" check-ignore -q -- "$probe" 2>/dev/null && return 0
+  printf '%s\n' "$entry" >> "$gi"
+  echo "added $entry to .gitignore"
+}
+
+# `llm init` scaffolds a repo: the .llm-toolkit/ template, the llm-toolkit
+# block in the repo's root .env (created, or appended if the block is missing),
+# and the .gitignore entries that keep runtime state out of git.
 if [ "$HARNESS" = "init" ]; then
   mkdir -p "$STATE_DIR/data"
 
@@ -192,12 +206,11 @@ if [ "$HARNESS" = "init" ]; then
   done
 
   echo "state dir: $STATE_DIR"
-  echo "add to .gitignore:"
-  echo "  .env"
+  ensure_ignored ".env"
   if [ "$STATE_DIR" = "$REPO_ROOT" ]; then
-    echo "  /data/"
+    ensure_ignored "/data/"
   else
-    echo "  ${STATE_DIR#"$REPO_ROOT"/}/data/"
+    ensure_ignored "${STATE_DIR#"$REPO_ROOT"/}/data/"
   fi
   exit 0
 fi
@@ -217,6 +230,23 @@ case "$HARNESS" in
 esac
 
 [ -d "$WORKDIR" ] || die "WORKDIR does not exist: $WORKDIR"
+
+# opencode snapshots the workspace with git. If the harness data dir lives inside
+# the workspace and isn't gitignored, each snapshot re-hashes the previous one —
+# runaway CPU and disk. Warn before launching (repos created before `llm init`
+# learned to write .gitignore).
+if [ "$HARNESS" = "opencode" ] && command -v git >/dev/null 2>&1 \
+   && git -C "$WORKDIR" rev-parse --git-dir >/dev/null 2>&1; then
+  case "$STATE_DIR/data" in
+    "$WORKDIR"/*)
+      data_rel="${STATE_DIR#"$WORKDIR"/}/data"
+      if ! git -C "$WORKDIR" check-ignore -q -- "$data_rel" 2>/dev/null; then
+        echo "llm: warning: $data_rel is inside the workspace and not gitignored." >&2
+        echo "     opencode's git snapshots will include it (runaway CPU/disk)." >&2
+        echo "     fix: echo '$data_rel/' >> \"$WORKDIR/.gitignore\"" >&2
+      fi ;;
+  esac
+fi
 
 # Prepend the model if the caller asked for one and didn't pass it themselves.
 MODEL="${MODEL:-}"

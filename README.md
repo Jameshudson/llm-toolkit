@@ -136,22 +136,28 @@ Bypass with `LLM_SKIP_KEY_CHECK=1` (e.g. when you authenticated another way).
 From anywhere inside a git repo:
 
 ```sh
-llm init          # scaffold .llm-toolkit/ + add the llm-toolkit block to .env
+llm init          # scaffold .llm-toolkit/, add the .env block + .gitignore entries
 $EDITOR .env
 llm opencode      # or: llm pi
 ```
 
 `llm init` copies the toolkit's `template/` into the repo as `.llm-toolkit/`
-(`config/`, `image/`, `README.md`), and adds a `# --- llm-toolkit ---` block to the
+(`config/`, `image/`, `README.md`), adds a `# --- llm-toolkit ---` block to the
 repo's **root `.env`** — creating it, or appending if the block isn't already
-there.
+there — and adds `.env` and `.llm-toolkit/data/` to the repo's `.gitignore`
+(idempotently, only if not already covered).
 
-Commit `.llm-toolkit/` (except its `data/`), and keep the root `.env` out of git:
+Commit `.llm-toolkit/` (except its `data/`), and keep the root `.env` out of git.
+`llm init` writes those entries to `.gitignore` for you:
 
 ```gitignore
 .env
 .llm-toolkit/data/
 ```
+
+Keeping `data/` ignored matters: opencode snapshots the workspace with git, so a
+data dir left inside the repo (and not ignored) makes each snapshot re-hash the
+previous one — runaway CPU and disk. `llm opencode` warns if it ever sees that.
 
 That's the whole integration — no submodule, no vendored files. `llm` finds the
 enclosing repo, keeps state in `.llm-toolkit/`, and runs against the repo root.
