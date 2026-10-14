@@ -6,3 +6,4 @@
 
 # OS noise
 .DS_Store
+.llm-toolkit/data/
