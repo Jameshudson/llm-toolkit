@@ -298,8 +298,9 @@ Add a `RENOVATE_TOKEN` repo secret: a classic PAT with `repo` scope, plus
   shims (`images/base/clip/llm-clip`) that forward copies to the host clipboard
   over OSC 52; the terminal must support it (iTerm2, Ghostty, kitty, WezTerm,
   Alacritty — not Apple Terminal.app). Reads aren't bridged, so paste with the
-  terminal's own binding (Cmd+V). opencode's mouse capture is disabled in
-  `tui.json` so native selection and Cmd+C keep working.
+  terminal's own binding (Cmd+V). opencode keeps mouse capture on (`tui.json`)
+  so the wheel scrolls the TUI; select with the terminal's bypass modifier
+  (Option/⌥-drag) and copy with Cmd+C.
 - A project's `config/` lives in `.llm-toolkit/config/` (committed). The toolkit's
   `template/` is the source it is copied from, and the fallback when a repo
   has none.
