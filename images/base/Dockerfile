@@ -23,6 +23,7 @@ RUN apt-get update \
       jq \
       less \
       libstdc++6 \
+      ncurses-term \
       openssh-client \
       ripgrep \
       tar \
@@ -34,6 +35,13 @@ RUN apt-get update \
 # hooks, then execs the command. Harness-specific setup lives in harness images.
 COPY images/base/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Clipboard bridge: harnesses shell out to xclip/xsel/wl-copy, but the container
+# has no display server. These symlinks point at one OSC 52 shim that forwards
+# copies to the host terminal's clipboard. See images/base/clip/llm-clip.
+COPY images/base/clip/llm-clip /usr/local/bin/llm-clip
+RUN chmod +x /usr/local/bin/llm-clip \
+ && for n in xclip xsel wl-copy wl-paste; do ln -sf llm-clip "/usr/local/bin/$n"; done
 
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

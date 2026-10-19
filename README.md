@@ -99,7 +99,7 @@ its settings) before pulling.
 
 | Image | Contents |
 |---|---|
-| `llm-toolkit:base` | Debian bookworm-slim + git, ripgrep, jq, curl, ssh, and archive tools. No Node, no harness. |
+| `llm-toolkit:base` | Debian bookworm-slim + git, ripgrep, jq, curl, ssh, archive tools, and OSC 52 clipboard shims. No Node, no harness. |
 | `llm-toolkit:node` | base + Node 24. Shared by both harness images. |
 | `llm-toolkit:opencode` | node + opencode. |
 | `llm-toolkit:pi` | node + pi. |
@@ -270,6 +270,12 @@ or-key delete <hash>
   config that way); a repo can add image hooks too, or use `on-start.sh`.
 - The host's `~/.ssh` and git config are mounted for git operations; the SSH
   agent socket is forwarded when available.
+- There's no display server, so the base image ships `xclip`/`xsel`/`wl-copy`
+  shims (`images/base/clip/llm-clip`) that forward copies to the host clipboard
+  over OSC 52; the terminal must support it (iTerm2, Ghostty, kitty, WezTerm,
+  Alacritty — not Apple Terminal.app). Reads aren't bridged, so paste with the
+  terminal's own binding (Cmd+V). opencode's mouse capture is disabled in
+  `tui.json` so native selection and Cmd+C keep working.
 - A project's `config/` lives in `.llm-toolkit/config/` (committed). The toolkit's
   `template/` is the source it is copied from, and the fallback when a repo
   has none.

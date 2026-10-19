@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# OSC 52 clipboard bridge for the llm-toolkit container.
+#
+# Coding harnesses (opencode, …) call xclip/xsel/wl-copy to reach the system
+# clipboard, but there is no X11/Wayland server in the container and no way to
+# reach the host clipboard from inside. This script is symlinked as xclip,
+# xsel, wl-copy and wl-paste: on copy it emits an OSC 52 escape sequence to the
+# controlling terminal, which the host terminal emulator turns into a native
+# clipboard write. The text never leaves the TTY, so it works over a plain
+# `docker run -it` with no extra mounts.
+#
+# Requires a terminal that honours OSC 52 (iTerm2, Ghostty, kitty, WezTerm,
+# Alacritty, …). Apple's Terminal.app does not.
+#
+# Reads are not supported: OSC 52 paste needs a terminal reply, and querying it
+# would race the running TUI for terminal input. Paste with the terminal's own
+# binding (Cmd+V) instead; this shim reports an empty clipboard.
+set -u
+
+prog="$(basename "$0")"
+mode=copy
+
+case "$prog" in
+  wl-paste) mode=read ;;
+  wl-copy)  mode=copy ;;
+  xclip)
+    for a in "$@"; do
+      case "$a" in -o|--out|-out) mode=read ;; esac
+    done ;;
+  xsel)
+    for a in "$@"; do
+      case "$a" in -o|--output) mode=read ;; esac
+    done ;;
+esac
+
+# Version/help probes (e.g. `xclip -version`) must not block on stdin.
+case " $* " in
+  *" --version "*|*" -version "*) echo "llm-clip (OSC 52)"; exit 0 ;;
+esac
+
+# Nothing to read over OSC 52; let the caller fall back to a terminal paste.
+[ "$mode" = read ] && exit 0
+
+# A copy is driven by text on stdin. If stdin is the terminal itself we were
+# invoked without a payload — do not block reading it.
+[ -t 0 ] && exit 0
+
+# Base64 the payload (stdin, byte-exact) and emit OSC 52: ESC ] 52 ; c ; <b64> BEL.
+enc="$(base64 | tr -d '\r\n')" || exit 0
+[ -n "$enc" ] || exit 0
+
+if [ -w /dev/tty ]; then
+  printf '\033]52;c;%s\a' "$enc" 2>/dev/null > /dev/tty || true
+fi
+exit 0
