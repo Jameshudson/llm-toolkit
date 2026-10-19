@@ -195,14 +195,22 @@ Everything is optional; the toolkit works with none of it.
 ### Extra mount paths
 
 Create `.llm-toolkit/image/mounts`, one `host:container[:opts]` per line. `#`
-comments, blank lines, and a leading `~` (expands to `$HOME`) are supported.
-Relative host paths resolve from the repo root.
+comments, blank lines, and a leading `~` (expands to the host `$HOME`) are
+supported. Relative host paths resolve from the repo root.
 
 ```
 # .llm-toolkit/image/mounts
 ~/.aws:/root/.aws:ro
 ~/.config/gh:/root/.config/gh:ro
 ../shared-schemas:/workspace/schemas
+```
+
+A `~` on *both* sides mounts a host directory at the same absolute path inside
+the container, so host paths resolve unchanged — useful for drag-and-drop:
+
+```
+~/Desktop:~/Desktop:ro
+~/Downloads:~/Downloads:ro
 ```
 
 To change what is mounted at `/workspace`, set `WORKDIR` in `.env` (or

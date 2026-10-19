@@ -422,16 +422,33 @@ mounts=(
 [ -f "$HOME/.gitconfig" ] && mounts+=(-v "$HOME/.gitconfig:/etc/gitconfig:ro")
 
 # Per-repo extra mounts. One "host:container[:opts]" per line; '#' comments and
-# blank lines ignored; a leading ~ expands to $HOME. Lives in image/ (falling
-# back to the .llm-toolkit/ root for older repos).
+# blank lines ignored; a leading ~ on either side expands to the host $HOME.
+# Lives in image/ (falling back to the .llm-toolkit/ root for older repos).
 MOUNTS_FILE="$STATE_DIR/image/mounts"
 [ -f "$MOUNTS_FILE" ] || MOUNTS_FILE="$STATE_DIR/mounts"
 if [ -f "$MOUNTS_FILE" ]; then
   while IFS= read -r m || [ -n "$m" ]; do
     m="${m%%$'\r'}"
     case "$m" in ''|\#*) continue ;; esac
-    m="${m/#\~/$HOME}"
-    case "$m" in /*) ;; *) m="$REPO_ROOT/$m" ;; esac
+    # Split host:container[:opts]. A leading ~ on either side expands to the host
+    # $HOME, so "~/Desktop:~/Desktop" mounts the host dir at the same absolute
+    # path inside the container — host paths (e.g. dragged files) then resolve.
+    host="${m%%:*}"
+    cpath=""
+    opts=""
+    if [ "$host" != "$m" ]; then
+      rest="${m#*:}"
+      if [ "$rest" != "${rest%%:*}" ]; then
+        cpath="${rest%:*}"
+        opts=":${rest##*:}"
+      else
+        cpath="$rest"
+      fi
+    fi
+    host="${host/#\~/$HOME}"
+    cpath="${cpath/#\~/$HOME}"
+    case "$host" in /*) ;; *) case "$host" in "") ;; *) host="$REPO_ROOT/$host" ;; esac ;; esac
+    if [ -n "$cpath" ]; then m="$host:$cpath$opts"; else m="$host"; fi
     mounts+=(-v "$m")
   done < "$MOUNTS_FILE"
 fi
