@@ -1,0 +1,33 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "labels": ["dependencies"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Harness versions annotated with '# renovate:' in the Dockerfiles.",
+      "managerFilePatterns": ["/(^|/)Dockerfile$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG \\w+_VERSION=(?<currentValue>\\S+)"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "llm-toolkit:* are local build refs, not published images.",
+      "matchManagers": ["dockerfile"],
+      "matchPackageNames": ["/^llm-toolkit$/"],
+      "enabled": false
+    },
+    {
+      "description": "Group base image (Debian/Node) bumps.",
+      "matchManagers": ["dockerfile"],
+      "groupName": "base images"
+    },
+    {
+      "description": "Group GitHub Actions bumps.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    }
+  ]
+}

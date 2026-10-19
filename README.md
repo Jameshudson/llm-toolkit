@@ -271,6 +271,19 @@ or-key delete <hash>
 `~/.llm-toolkit/keys.json`). Clean up old ones with `or-key list` and
 `or-key delete`.
 
+## Dependency updates
+
+Renovate runs self-hosted from `.github/workflows/renovate.yml` (daily, or via
+manual dispatch) using the root `renovate.json`. It opens PRs for:
+
+- the Dockerfile base images (`debian:bookworm-slim`, `node:24-bookworm-slim`);
+- the GitHub Actions used in `.github/workflows/`;
+- the harness versions — annotate an `ARG` with `# renovate:` (see
+  `images/opencode/Dockerfile`, `images/pi/Dockerfile`).
+
+Add a `RENOVATE_TOKEN` repo secret: a classic PAT with `repo` scope, plus
+`workflow` so it may update files under `.github/workflows/`.
+
 ## Notes
 
 - The base entrypoint is harness-agnostic. Harness-specific setup ships in the

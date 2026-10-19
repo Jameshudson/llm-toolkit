@@ -1,0 +1,30 @@
+name: renovate
+
+# Self-hosted Renovate: opens PRs to update the Dockerfile base images, the
+# pinned harness versions, and the GitHub Actions used here.
+#
+# Requires a `RENOVATE_TOKEN` secret: a PAT (classic) with `repo` scope, plus
+# `workflow` so Renovate may update files under .github/workflows/. Config
+# lives in renovate.json at the repo root.
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Self-hosted Renovate
+        uses: renovatebot/github-action@v46
+        with:
+          token: ${{ secrets.RENOVATE_TOKEN }}
+          renovate-version: "44"
+        env:
+          LOG_LEVEL: info
+          RENOVATE_REPOSITORIES: ${{ github.repository }}

@@ -8,7 +8,7 @@
 ARG NODE_REF=llm-toolkit:node
 FROM ${NODE_REF}
 
-# Pinned deliberately; Renovate does not manage this file.
+# renovate: datasource=npm depName=@earendil-works/pi-coding-agent
 ARG PI_VERSION=1.1.0
 
 # Pi installs with --ignore-scripts per its docs.

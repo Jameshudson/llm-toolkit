@@ -8,7 +8,7 @@
 ARG NODE_REF=llm-toolkit:node
 FROM ${NODE_REF}
 
-# Pinned deliberately; Renovate does not manage this file.
+# renovate: datasource=npm depName=opencode-ai
 ARG OPENCODE_VERSION=1.19.0
 
 # The npm shim fetches the platform binary in its postinstall, so scripts stay on.
