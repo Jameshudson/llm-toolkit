@@ -5,8 +5,10 @@ name: images
 # plus versioned tags (see images/VERSION) and an immutable per-commit tag.
 # Multi-arch (amd64 + arm64) so Apple Silicon pulls a native image.
 #
-# Runs only when the image definitions change (images/**) or this workflow does.
-# Bump images/VERSION to cut a new release.
+# Runs when the image definitions change (images/**) or this workflow does, and
+# auto-bumps images/VERSION (patch): it commits the new version, publishes the
+# images, and tags v<version>. Edit images/VERSION in your own push to release an
+# explicit version instead — the auto-bump is then skipped.
 
 on:
   push:
@@ -16,8 +18,14 @@ on:
       - ".github/workflows/images.yml"
   workflow_dispatch:
 
+# The version commit and release tag are pushed with the workflow token, which
+# does not re-trigger workflows — so there is no loop back into this job.
+concurrency:
+  group: images
+  cancel-in-progress: false
+
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
@@ -29,12 +37,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Resolve version
         id: ver
         run: |
-          echo "name=$(tr -d '[:space:]' < images/VERSION)" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          cur="$(tr -d '[:space:]' < images/VERSION)"
+          prev="$(git show HEAD^:images/VERSION 2>/dev/null | tr -d '[:space:]' || true)"
+          changed="$(git diff --name-only HEAD^ HEAD -- images 2>/dev/null | grep -v '^images/VERSION$' || true)"
+
+          bump=false
+          next="$cur"
+          if [ -n "$prev" ] && [ "$prev" != "$cur" ]; then
+            echo "images/VERSION edited in this push — releasing $cur as-is"
+          elif [ -n "$changed" ]; then
+            case "$cur" in *.*.*) ;; *) echo "images/VERSION must be x.y.z, got '$cur'" >&2; exit 1 ;; esac
+            IFS=. read -r major minor patch <<<"$cur"
+            case "$patch" in ''|*[!0-9]*) echo "non-numeric patch in '$cur'" >&2; exit 1 ;; esac
+            next="${major}.${minor}.$((patch + 1))"
+            printf '%s\n' "$next" > images/VERSION
+            bump=true
+            echo "auto-bumping $cur -> $next"
+          else
+            echo "no image definition change — publishing $cur"
+          fi
+
+          echo "name=$next" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
 
       - name: Lowercase owner
         id: owner
@@ -107,3 +139,25 @@ jobs:
             ${{ env.REGISTRY }}/${{ steps.owner.outputs.name }}/llm-toolkit:pi-sha-${{ steps.ver.outputs.sha }}
           cache-from: type=gha,scope=pi
           cache-to: type=gha,mode=max,scope=pi
+
+      # Persist the bumped version only after every image published, so a failed
+      # build leaves images/VERSION untouched and the next run retries the same.
+      - name: Commit version
+        if: steps.ver.outputs.bump == 'true'
+        run: |
+          git add images/VERSION
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m "images: release ${{ steps.ver.outputs.name }} [skip ci]"
+          git push
+
+      - name: Tag release
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.ver.outputs.name }}"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "tag $tag already exists"
+          else
+            git tag "$tag"
+            git push origin "$tag"
+          fi

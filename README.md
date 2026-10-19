@@ -67,9 +67,9 @@ untouched.
 
 This repo's images are published to GHCR as
 `ghcr.io/jameshudson/llm-toolkit:{base,node,opencode,pi}` by the `images` GitHub
-Actions workflow (`.github/workflows/images.yml`). It runs only when the image
-definitions change (`images/**`) or on manual dispatch, and builds multi-arch
-(amd64 + arm64) so Apple Silicon pulls a native image.
+Actions workflow (`.github/workflows/images.yml`). It runs when the image
+definitions change (`images/**`) or on manual dispatch, builds multi-arch
+(amd64 + arm64) so Apple Silicon pulls a native image, and cuts a release.
 
 Each layer is tagged three ways:
 
@@ -79,7 +79,10 @@ Each layer is tagged three ways:
 | `:<layer>-<version>` | `:opencode-0.1.0` | release version (`images/VERSION`) |
 | `:<layer>-sha-<short>` | `:opencode-sha-abc1234` | immutable, per commit |
 
-Bump `images/VERSION` to cut a release. To pin an image, set
+Releases are automatic: a push to `main` that changes `images/**` patch-bumps
+`images/VERSION`, commits it, publishes the images, and tags `v<version>`. To cut
+an explicit version, edit `images/VERSION` in the same push — the auto-bump is
+then skipped and your value is used as-is. To pin an image, set
 `LLM_IMAGE=ghcr.io/jameshudson/llm-toolkit:opencode-0.1.0` (or the `-sha-…` tag).
 
 To publish by hand instead:
