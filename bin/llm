@@ -17,8 +17,10 @@
 #   image/env         extra env vars to forward to the container, one NAME per line
 #   image/on-start.sh runs inside the container before the harness starts
 #
-# Images are pulled from LLM_REGISTRY when set, and built from this toolkit's
-# Dockerfiles otherwise (or as a fallback).
+# With LLM_REGISTRY set, every launch re-pulls the images (LLM_PULL=0 to skip),
+# so a newer published image is used automatically; failures fall back to the
+# local image, then a build from this toolkit's Dockerfiles. A repo's derived
+# image is rebuilt when its base image changes.
 #
 # When OPENROUTER_MANAGEMENT_KEY is set (and LLM_SESSION_KEYS is not 0), one
 # OpenRouter API key per project+harness is reused (cached in
@@ -309,14 +311,21 @@ have() { docker image inspect "$1" >/dev/null 2>&1; }
 # Pull the image if the registry is configured; otherwise (or on pull failure)
 # build it from the toolkit's Dockerfile. $2 is the Dockerfile, $3.. are extra
 # build args.
+#
+# With a registry we re-pull on every launch, so a newer published image is used
+# without a manual pull. If the pull fails (offline, private image, no auth) we
+# fall back to the local image, then to a build. Set LLM_PULL=0 to skip the
+# refresh entirely.
 fetch() {
   local ref="$1" df="$2"; shift 2
+  case "${LLM_PULL:-1}" in 0|no|false|never|off) ;; *)
+    if [ -n "$REGISTRY" ]; then
+      echo "llm: pulling $ref ..." >&2
+      docker pull "$ref" >&2 && return 0
+      echo "llm: pull failed; falling back to a local image or build" >&2
+    fi ;;
+  esac
   have "$ref" && return 0
-  if [ -n "$REGISTRY" ]; then
-    echo "llm: pulling $ref ..." >&2
-    docker pull "$ref" && return 0
-    echo "llm: pull failed; falling back to a local build" >&2
-  fi
   [ -f "$df" ] || die "image $ref not present and no Dockerfile to build it"
   echo "llm: building $ref ..." >&2
   docker build -f "$df" -t "$ref" "$@" "$TOOLKIT_DIR" >&2
@@ -348,8 +357,13 @@ elif [ -f "$STATE_DIR/image/Dockerfile" ] || [ -f "$STATE_DIR/Dockerfile" ]; the
   fi
   BUILD_CONTEXT="$REPO_ROOT"
   IMAGE="llm-toolkit:repo-${SLUG}-${HARNESS_FOR_IMAGE}"
+  # Rebuild the derived image when its base image changes (a newer published
+  # image, or a rebuilt local one) — Docker's layer cache keeps it cheap.
+  base_ref="$(img "$HARNESS_FOR_IMAGE")"
+  base_before="$(docker image inspect --format '{{.Id}}' "$base_ref" 2>/dev/null || true)"
   ensure_harness "$HARNESS_FOR_IMAGE"
-  if ! have "$IMAGE"; then
+  base_after="$(docker image inspect --format '{{.Id}}' "$base_ref" 2>/dev/null || true)"
+  if ! have "$IMAGE" || [ "$base_before" != "$base_after" ]; then
     echo "llm: building $IMAGE from $DOCKERFILE ..." >&2
     docker build -f "$DOCKERFILE" \
       --build-arg "LLM_REGISTRY=$REGISTRY" --build-arg "HARNESS=$HARNESS_FOR_IMAGE" \

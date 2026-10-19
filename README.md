@@ -93,10 +93,12 @@ make publish      # builds and pushes llm-toolkit:{base,node,opencode,pi}
 ```
 
 `LLM_REGISTRY` is the prefix before `llm-toolkit` (trailing slash). With it set,
-`llm` pulls images and only falls back to a local build if the pull fails; with
-it empty, images use local tags and are built on demand. GHCR packages are
-private by default — run `docker login ghcr.io` (or make the package public in
-its settings) before pulling.
+`llm` re-pulls the images on every launch, so a newly published release is
+picked up automatically; if the pull fails it falls back to the local image,
+then a local build. Set `LLM_PULL=0` to skip the refresh (e.g. offline). With it
+empty, images use local tags and are built on demand. GHCR packages are private
+by default — run `docker login ghcr.io` (or make the package public in its
+settings) before pulling.
 
 ## Images
 
@@ -235,9 +237,10 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 ```
 
-`llm` builds it as `llm-toolkit:repo-<repo-name>-<harness>` on first use, and the
-matching run uses it automatically. Deriving from `base` gives you no Node — use
-`HARNESS=opencode` (or `pi`) if the tools need it.
+`llm` builds it as `llm-toolkit:repo-<repo-name>-<harness>` on first use and
+rebuilds it whenever the base image changes, and the matching run uses it
+automatically. Deriving from `base` gives you no Node — use `HARNESS=opencode`
+(or `pi`) if the tools need it.
 
 For lighter, on-demand setup, add `.llm-toolkit/image/on-start.sh` — it runs
 inside the container (as root, in `/workspace`) before the harness starts.
