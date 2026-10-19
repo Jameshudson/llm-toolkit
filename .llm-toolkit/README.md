@@ -27,21 +27,23 @@ runs.
 ### mounts
 
 Extra docker mounts, one `host:container[:opts]` per line. `#` comments, blank
-lines, and a leading `~` on either side (expands to the host `$HOME`) are
-supported; relative host paths resolve from the repo root.
+lines, a leading `~` (expands to the host `$HOME`), and `$VAR` / `${VAR}`
+(expands from the environment) are supported on either side; relative host paths
+resolve from the repo root.
 
     # .llm-toolkit/image/mounts
     ~/.aws:/root/.aws:ro
     ~/.config/gh:/root/.config/gh:ro
     ../shared-schemas:/workspace/schemas
 
-Expanding `~` on *both* sides mounts a host directory at the same absolute path
-inside the container, so host filesystem paths resolve unchanged — handy for
-dragging files (e.g. screenshots) into the harness:
+Expanding `~` or a variable on *both* sides mounts a host directory at the same
+absolute path inside the container, so host filesystem paths resolve unchanged.
+Handy for dragging files (e.g. screenshots) into the harness — macOS drops
+dragged screenshots in `$TMPDIR`:
 
     # .llm-toolkit/image/mounts
     ~/Desktop:~/Desktop:ro
-    ~/Downloads:~/Downloads:ro
+    $TMPDIR:$TMPDIR:ro
 
 ### Dockerfile
 

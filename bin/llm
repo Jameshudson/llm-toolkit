@@ -13,7 +13,8 @@
 #   .env              keys and defaults (see .env.example)
 #   config/           opencode/pi config overriding the toolkit defaults
 #   image/Dockerfile  derived image FROM ${LLM_REGISTRY}llm-toolkit:${HARNESS}
-#   image/mounts      extra docker mounts, one "host:container[:ro]" per line
+#   image/mounts      extra docker mounts, one "host:container[:opts]" per line
+#                     (leading ~ -> $HOME, and $VAR -> environment, on either side)
 #   image/env         extra env vars to forward to the container, one NAME per line
 #   image/on-start.sh runs inside the container before the harness starts
 #
@@ -435,18 +436,35 @@ mounts=(
 [ -d "$HOME/.ssh" ] && mounts+=(-v "$HOME/.ssh:/root/.ssh-host:ro")
 [ -f "$HOME/.gitconfig" ] && mounts+=(-v "$HOME/.gitconfig:/etc/gitconfig:ro")
 
+# Expand $VAR and ${VAR} in a mount path from the host environment. Only
+# environment lookups — no command substitution or eval — so a committed mounts
+# file can't run code. Unset variables expand to nothing.
+expand_vars() {
+  local s="$1" out="" match pre name val
+  while [[ "$s" =~ \$(\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*) ]]; do
+    match="${BASH_REMATCH[0]}"
+    pre="${s%%"$match"*}"
+    out+="$pre"
+    name="${match#\$}"; name="${name#\{}"; name="${name%\}}"
+    val="$(printenv "$name" 2>/dev/null || true)"
+    out+="$val"
+    s="${s#"$pre$match"}"
+  done
+  printf '%s' "$out$s"
+}
+
 # Per-repo extra mounts. One "host:container[:opts]" per line; '#' comments and
-# blank lines ignored; a leading ~ on either side expands to the host $HOME.
-# Lives in image/ (falling back to the .llm-toolkit/ root for older repos).
+# blank lines ignored. A leading ~ on either side expands to the host $HOME, and
+# $VAR / ${VAR} expand from the environment (e.g. "$TMPDIR:$TMPDIR" for dragged
+# macOS screenshots). Lives in image/ (falling back to .llm-toolkit/ root).
 MOUNTS_FILE="$STATE_DIR/image/mounts"
 [ -f "$MOUNTS_FILE" ] || MOUNTS_FILE="$STATE_DIR/mounts"
 if [ -f "$MOUNTS_FILE" ]; then
   while IFS= read -r m || [ -n "$m" ]; do
     m="${m%%$'\r'}"
     case "$m" in ''|\#*) continue ;; esac
-    # Split host:container[:opts]. A leading ~ on either side expands to the host
-    # $HOME, so "~/Desktop:~/Desktop" mounts the host dir at the same absolute
-    # path inside the container — host paths (e.g. dragged files) then resolve.
+    # Split host:container[:opts] first, then expand each side, so a value that
+    # itself contains ':' can't confuse the split.
     host="${m%%:*}"
     cpath=""
     opts=""
@@ -459,8 +477,8 @@ if [ -f "$MOUNTS_FILE" ]; then
         cpath="$rest"
       fi
     fi
-    host="${host/#\~/$HOME}"
-    cpath="${cpath/#\~/$HOME}"
+    host="${host/#\~/$HOME}"; host="$(expand_vars "$host")"
+    cpath="${cpath/#\~/$HOME}"; cpath="$(expand_vars "$cpath")"
     case "$host" in /*) ;; *) case "$host" in "") ;; *) host="$REPO_ROOT/$host" ;; esac ;; esac
     if [ -n "$cpath" ]; then m="$host:$cpath$opts"; else m="$host"; fi
     mounts+=(-v "$m")
